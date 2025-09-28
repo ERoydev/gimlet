@@ -138,13 +138,6 @@ class LldbDebuggerManager {
 
                 if (functionName) {
                     callback(bpObject, functionName);
-                    // runAgaveLedgerTool(
-                    //     debuggerSession.globalWorkspaceFolder,
-                    //     debuggerSession.globalBpfCompiledPath,
-                    //     functionName,
-                    //     debuggerSession.globalInputPath,
-                    //     bpObject
-                    // );
                 } else {
                     vscode.window.showErrorMessage(
                         'Breakpoint is not inside a function.'
@@ -183,14 +176,6 @@ class LldbDebuggerManager {
                 if (selected && selected.functionName) {
                     bpObject = selected.breakpoint;
                     callback(bpObject, selected.functionName);
-
-                    // runAgaveLedgerTool(
-                    //     debuggerSession.globalWorkspaceFolder,
-                    //     debuggerSession.globalBpfCompiledPath,
-                    //     selected.functionName,
-                    //     debuggerSession.globalInputPath,
-                    //     bpObject
-                    // );
                 } else if (selected) {
                     vscode.window.showErrorMessage(
                         'Selected breakpoint is not inside a function.'

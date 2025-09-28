@@ -8,7 +8,7 @@ const os = require('os');
 const buildCommands = require('./buildCommands');
 const { debuggerManager, LldbDebuggerManager } = require('../debuggerManager');
 const getTerminalByName = require('../utils/getTerminalByName');
-
+const net = require('net');
 
 class litesvmBuildStrategy extends BaseBuildStrategy {
     constructor(
@@ -77,7 +77,8 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
             // This testProcess have to be stopped when i want to start it again, instead of leaving it running in the background
             // I can do that by keeping a reference to the process and killing it when needed
             const testProcess = exec(
-                `cargo test -- --nocapture`,
+                // every child process inherit this ENV variable all the way to the 
+                `VM_DEBUG_PORT=${debuggerSession.tcpPort} cargo test -- --nocapture`, // I step ENV variable, the proceess that i run it will inherit the env var
                 { cwd: this.workspaceFolder },
                 (err, stdout, stderr) => {
                     if (err) {
@@ -90,8 +91,6 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
                 }
             );
 
-            let debuggerConnected = false;
-
             // listen for output to detect when gdbstub is ready
             // Helper to handle both stdout and stderr
             const handleDebuggerReady = async (data) => {
@@ -99,41 +98,48 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
                 console.log(output);
 
                 // This handles when we have open TCP port
-                if (output.includes('Waiting for a Debugger connection on')) {
+                if (output.includes('Waiting for a Debugger connection on')) {                    
                     await this.connectToTcpPort();
                     resolve(true);
                 }
 
-                if (output.includes("Debugger connected from")) {
-                    setTimeout(() => {
-                        this._sendContinueToDebuggerTerminal();
-                        resolve(true);
-                    }, 1000);
-                }
+                // else if (output.includes('Client disconnected')) {
+                //     debuggerSession.isLldbConnected = false; // Reset the connection status
+                // }
 
-                if (output.includes('error: test failed, to rerun pass')) {
-                    vscode.window.showInformationMessage("Debugging session ended.");
-                    if (testProcess) {
-                        testProcess.kill();
-                    }
-                }
+                // else if (output.includes("Debugger connected from")) {
+                //     setTimeout(() => {
+                //         this._sendContinueToDebuggerTerminal();
+                //         resolve(true);
+                //     }, 1000);
+                // }
+
+                // else if (output.includes('error: test failed, to rerun pass')) {
+                //     vscode.window.showInformationMessage("Debugging session ended.");
+                //     // TODO: This works fine for now, but ideally i should have a better way to handle this
+                //     // When for some reason the test fails, i just invoke this function again until the function doesn't fail
+                //     // Problem if something else goes wrong, it will be an infinite loop
+                //     debuggerSession.isLldbConnected = false;
+                //     // this.startLitesvmVmWithDebugger(bpObject);
+                // }
             };
-
             testProcess.stderr.on('data', handleDebuggerReady);
         });
     }
 
     async connectToTcpPort() {
         const terminal = getTerminalByName('Solana LLDB Debugger');
-    
+        
         if (debuggerSession.isLldbConnected) {
             terminal.sendText('process detach'); // Detach from the previous process if already connected
+            debuggerSession.isLldbConnected = false; // Reset the connection status
         }
         
-        if (terminal) {
+        if (terminal && !debuggerSession.isLldbConnected) {
             debuggerSession.activeTerminal = terminal;
-            terminal.sendText(`gdb-remote 127.0.0.1:1234`); // Connect to the gdb server that agave-ledger-tool started on
             debuggerSession.isLldbConnected = true; // Set the connection status to true
+            console.log('LLDB connection status from TCP PORT FUNCTION:', debuggerSession.isLldbConnected);
+            terminal.sendText(`gdb-remote 127.0.0.1:${debuggerSession.tcpPort}`); // Connect to the gdbstub TCP port to litesvm VM
         }
     }
 
@@ -170,9 +176,6 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
             terminal.show();
             terminal.sendText('solana-lldb');
             terminal.sendText(`target create "${executablePath}"`);
-            // terminal.sendText("gdb-remote 127.0.0.1:1234")
-            // this.connectToTcpPort();
-            // pollDebuggerConnection(1234);
 
             if (progress)
                 progress.report({
@@ -180,7 +183,7 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
                     message: 'Debug session ready!',
                 });
 
-            // debuggerManager.restoreBreakpoints();
+            debuggerManager.restoreBreakpoints();
             debuggerSession.breakpointListenerDisposable =
                 debuggerManager.listenForBreakpointChanges();
 
@@ -204,17 +207,58 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
 
     _sendContinueToDebuggerTerminal() {
         const terminal = getTerminalByName('Solana LLDB Debugger');
-        if (terminal) {
+        console.log('LLDB connection status from Continue function:', debuggerSession.isLldbConnected);
+        if (terminal && debuggerSession.isLldbConnected) {
             terminal.sendText('continue');
         } else {
-            vscode.window.showErrorMessage('Debugger terminal not found');
+            vscode.window.showErrorMessage('Debugger terminal not found or not connected.');
         }
     }
 
+    // Helper to delete the target/deploy files if they exist, so i will ensure that we are going to use the SBF V1 compiled SBF files
     _deleteIfExists(filePath) {
         if (filePath && fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
         }
+    }
+
+    async waitForPort(port, host, timeout = 1000, interval = 2000) {
+        return new Promise((resolve, reject) => {
+            const start = Date.now();
+
+            function tryConnect() {
+                const socket = new net.Socket();
+
+                socket.setTimeout(timeout);
+
+                socket.once('connect', () => {
+                    socket.destroy();
+                    resolve(true);
+                });
+
+                socket.once('timeout', () => {
+                    socket.destroy();
+                    retry();
+                });
+
+                socket.once('error', () => {
+                    socket.destroy();
+                    retry();
+                });
+
+                function retry() {
+                    if (Date.now() - start > timeout) {
+                        reject(new Error('Timeout waiting for port ' + port));
+                    } else {
+                        setTimeout(tryConnect, interval);
+                    }
+                }
+
+                socket.connect(port, host);
+            }
+
+        tryConnect();
+        });
     }
 }
 

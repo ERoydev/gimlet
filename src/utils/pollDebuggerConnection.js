@@ -26,7 +26,7 @@ function isPortOpen(port, host = '127.0.0.1') {
 /**
  * Polls the port every 2 seconds and shows a message when a client connects.
  */
-async function pollDebuggerConnection(port = 1234, host = '127.0.0.1') {
+async function pollDebuggerConnection(port, host = '127.0.0.1') {
     let wasOpen = false;
     while (true) {
         console.log('INSIDEEE');
