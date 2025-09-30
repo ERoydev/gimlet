@@ -8,7 +8,6 @@ const os = require('os');
 const buildCommands = require('./buildCommands');
 const { debuggerManager, LldbDebuggerManager } = require('../debuggerManager');
 const getTerminalByName = require('../utils/getTerminalByName');
-const net = require('net');
 
 class litesvmBuildStrategy extends BaseBuildStrategy {
     constructor(
@@ -19,6 +18,7 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
     ) {
         super(workspaceFolder, packageName, depsPath);
         this.buildCommand = buildCommand;
+        this._hasShownLitesvmTestMessage = false; // To avoid repeated messages
     }
 
     static get BUILD_TYPE() {
@@ -30,7 +30,6 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
     }
 
     async build(progress) {
-        // TODO: Make this into util and reuse it accordingly through all places where this is used
         let files;
         try {
             files = await fs.promises.readdir(this.depsPath);
@@ -70,79 +69,6 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
         });
     }
 
-    async startLitesvmVmWithDebugger(bpObject) {
-        this._keepOnlyBreakpoint(bpObject);
-
-        return new Promise((resolve) => {
-            // This testProcess have to be stopped when i want to start it again, instead of leaving it running in the background
-            // I can do that by keeping a reference to the process and killing it when needed
-            const testProcess = exec(
-                // every child process inherit this ENV variable all the way to the 
-                `VM_DEBUG_PORT=${debuggerSession.tcpPort} cargo test -- --nocapture`, // I step ENV variable, the proceess that i run it will inherit the env var
-                { cwd: this.workspaceFolder },
-                (err, stdout, stderr) => {
-                    if (err) {
-                        vscode.window.showErrorMessage(
-                            `Test environment setup error: ${stderr}`
-                        );
-                        resolve();
-                        return;
-                    }
-                }
-            );
-
-            // listen for output to detect when gdbstub is ready
-            // Helper to handle both stdout and stderr
-            const handleDebuggerReady = async (data) => {
-                const output = data.toString();
-                console.log(output);
-
-                // This handles when we have open TCP port
-                if (output.includes('Waiting for a Debugger connection on')) {                    
-                    await this.connectToTcpPort();
-                    resolve(true);
-                }
-
-                // else if (output.includes('Client disconnected')) {
-                //     debuggerSession.isLldbConnected = false; // Reset the connection status
-                // }
-
-                // else if (output.includes("Debugger connected from")) {
-                //     setTimeout(() => {
-                //         this._sendContinueToDebuggerTerminal();
-                //         resolve(true);
-                //     }, 1000);
-                // }
-
-                // else if (output.includes('error: test failed, to rerun pass')) {
-                //     vscode.window.showInformationMessage("Debugging session ended.");
-                //     // TODO: This works fine for now, but ideally i should have a better way to handle this
-                //     // When for some reason the test fails, i just invoke this function again until the function doesn't fail
-                //     // Problem if something else goes wrong, it will be an infinite loop
-                //     debuggerSession.isLldbConnected = false;
-                //     // this.startLitesvmVmWithDebugger(bpObject);
-                // }
-            };
-            testProcess.stderr.on('data', handleDebuggerReady);
-        });
-    }
-
-    async connectToTcpPort() {
-        const terminal = getTerminalByName('Solana LLDB Debugger');
-        
-        if (debuggerSession.isLldbConnected) {
-            terminal.sendText('process detach'); // Detach from the previous process if already connected
-            debuggerSession.isLldbConnected = false; // Reset the connection status
-        }
-        
-        if (terminal && !debuggerSession.isLldbConnected) {
-            debuggerSession.activeTerminal = terminal;
-            debuggerSession.isLldbConnected = true; // Set the connection status to true
-            console.log('LLDB connection status from TCP PORT FUNCTION:', debuggerSession.isLldbConnected);
-            terminal.sendText(`gdb-remote 127.0.0.1:${debuggerSession.tcpPort}`); // Connect to the gdbstub TCP port to litesvm VM
-        }
-    }
-
     async setupDebugger(progress) {
         if (!fs.existsSync(this.depsPath)) {
             vscode.window.showErrorMessage(
@@ -165,17 +91,28 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
                 return;
             }
 
+            // Create or reuse terminal
             const terminal = vscode.window.createTerminal(
-                'Solana LLDB Debugger'
+                'Solana LLDB Debugger',
             );
+            
+            // Set debugger states
             debuggerManager.setTerminal(terminal);
             debuggerManager.setBreakpointStrategy(
-                LldbDebuggerManager.lineNumberStrategy
-            ); // Set to line number strategy
+                LldbDebuggerManager.lineNumberStrategy // Set to line number strategy
+            ); 
 
+            // Start solana-lldb and set the target executable
             terminal.show();
             terminal.sendText('solana-lldb');
             terminal.sendText(`target create "${executablePath}"`);
+                        
+            // TCP port Polling
+            this.tryConnectToTcpPortWithRetry(60000, 5000) // 1 minute timeout, 1 second interval
+                .then(() => {
+                    this.startConnectionMonitor(5000); // Check connection every 5 seconds
+                })
+                .catch(err => vscode.window.showErrorMessage(err.message));
 
             if (progress)
                 progress.report({
@@ -188,9 +125,16 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
                 debuggerManager.listenForBreakpointChanges();
 
             terminal.onDidClose(() => {
+                if (this._connectionMonitor) {
+                    clearInterval(this._connectionMonitor);
+                    this._connectionMonitor = null;
+                }
+
                 if (debuggerSession.activeTerminal === terminal) {
                     debuggerSession.activeTerminal = null;
                 }
+
+                debuggerSession.isLldbConnected = false;
             });
         });
     }
@@ -205,16 +149,6 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
         }
     }
 
-    _sendContinueToDebuggerTerminal() {
-        const terminal = getTerminalByName('Solana LLDB Debugger');
-        console.log('LLDB connection status from Continue function:', debuggerSession.isLldbConnected);
-        if (terminal && debuggerSession.isLldbConnected) {
-            terminal.sendText('continue');
-        } else {
-            vscode.window.showErrorMessage('Debugger terminal not found or not connected.');
-        }
-    }
-
     // Helper to delete the target/deploy files if they exist, so i will ensure that we are going to use the SBF V1 compiled SBF files
     _deleteIfExists(filePath) {
         if (filePath && fs.existsSync(filePath)) {
@@ -222,42 +156,113 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
         }
     }
 
-    async waitForPort(port, host, timeout = 1000, interval = 2000) {
-        return new Promise((resolve, reject) => {
-            const start = Date.now();
-
-            function tryConnect() {
-                const socket = new net.Socket();
-
-                socket.setTimeout(timeout);
-
-                socket.once('connect', () => {
-                    socket.destroy();
-                    resolve(true);
-                });
-
-                socket.once('timeout', () => {
-                    socket.destroy();
-                    retry();
-                });
-
-                socket.once('error', () => {
-                    socket.destroy();
-                    retry();
-                });
-
-                function retry() {
-                    if (Date.now() - start > timeout) {
-                        reject(new Error('Timeout waiting for port ' + port));
-                    } else {
-                        setTimeout(tryConnect, interval);
-                    }
-                }
-
-                socket.connect(port, host);
+    async connectToTcpPort(delayMs = 1000) {
+        return new Promise((resolve) => {
+            // Check if terminal was closed
+            const terminal = getTerminalByName('Solana LLDB Debugger');
+            if (!terminal) {
+                return resolve(false);
             }
 
-        tryConnect();
+            // Always try to connect, don't rely on isLldbConnected here
+            debuggerSession.activeTerminal = terminal;
+
+            // Check if already connected before trying to connect
+            // prevent duplicate `gdb-remote` commands
+            this.checkDebuggerConnection().then((alreadyConnected) => {
+                if (alreadyConnected) {
+                    this._hasShownLitesvmTestMessage = false; // Reset on success
+                    return resolve(true);
+                }
+            
+
+                terminal.sendText(`gdb-remote 127.0.0.1:${debuggerSession.tcpPort}`);
+        
+                // Wait a short moment for the connection to establish
+                setTimeout(async () => {
+                    try {
+                        const connected = await this.checkDebuggerConnection();
+                        if (connected) {
+                            this._hasShownLitesvmTestMessage = false; // Reset on success
+                        } else {
+                            if (!this._hasShownLitesvmTestMessage) {
+                                vscode.window.showErrorMessage(
+                                    'Please run your litesvm tests to enable debugging.'
+                                );
+                                this._hasShownLitesvmTestMessage = true;
+                            }
+                            console.warn('Debugger TCP port connection NOT established.');
+                        }
+                        resolve(connected);
+                    } catch (err) {
+                        vscode.window.showErrorMessage(`Error checking debugger connection: ${err.message}`);
+                        resolve(false);
+                    }
+                }, delayMs);
+            });
+        })
+    }
+
+    async tryConnectToTcpPortWithRetry(timeoutMs = 60000, intervalMs = 1000) {
+        const start = Date.now();
+        let connected = false;
+
+        while (!connected && (Date.now() - start < timeoutMs)) {
+            try {
+                await this.connectToTcpPort();
+                if (debuggerSession.isLldbConnected) {
+                    connected = true;
+                    break;
+                }
+            } catch (err) {
+                // Connection attempt failed, will retry
+            }
+            await new Promise(res => setTimeout(res, intervalMs));
+        }
+
+        if (!connected) {
+            throw new Error('Failed to connect to debugger TCP port within timeout.');
+        }
+    }
+
+    // Periodically checks the debugger TCP port and reconnects if disconnected
+    startConnectionMonitor(intervalMs = 5000) {
+        if (this._connectionMonitor) {
+            clearInterval(this._connectionMonitor);
+        }
+
+        this._connectionMonitor = setInterval(async () => {
+            const wasConnected = debuggerSession.isLldbConnected;
+
+            await this.checkDebuggerConnection();
+            if (!debuggerSession.isLldbConnected && wasConnected) {
+                console.warn('Debugger TCP port disconnected. Attempting to reconnect...');
+                try {
+                    // Trigger the reconnect logic with the timeout
+                    await this.tryConnectToTcpPortWithRetry();
+                } catch (err) {
+                    vscode.window.showErrorMessage('Failed to reconnect to debugger TCP port.');
+                }
+            }
+        }, intervalMs);
+    }
+
+    // Checks if the debugger TCP port is still connected
+    async checkDebuggerConnection() {
+        return new Promise((resolve) => {
+            const port = debuggerSession.tcpPort;
+            exec(
+                `netstat -nat | grep -E '[:|.]${port}\\b' | grep 'ESTA' | wc -l`,
+                { cwd: this.workspaceFolder },
+                (err, stdout, stderr) => {
+                    if (stdout.trim() === '2') {
+                        debuggerSession.isLldbConnected = true;
+                    } else {
+                        debuggerSession.isLldbConnected = false;
+                    }
+                    resolve(debuggerSession.isLldbConnected);
+                }
+            );
         });
     }
 }

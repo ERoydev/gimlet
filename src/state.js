@@ -13,8 +13,8 @@ class GimletDebuggerSession {
         this.globalInputPath = null;
         this.functionAddressMapPath = null;
         
-        this.tcpPort = 5522;
-        this.host = '127.0.0.1';
+        this.tcpPort = 6912;
+        this.tcpHost = '127.0.0.1';
         this.isLldbConnected = false; // Track if LLDB is connected to the gdb server
         this.isAnchor = false; // Track if the project is an Anchor project
         this.selectedAnchorProgramName = null; // If it's an Anchor project with multiple programs, this will hold the selected program name(if its null then its single program project)
