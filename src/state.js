@@ -12,8 +12,10 @@ class GimletDebuggerSession {
         this.globalBpfCompiledPath = null;
         this.globalInputPath = null;
         this.functionAddressMapPath = null;
+        this.buildStrategy = null;
         
-        this.tcpPort = 6912;
+        // TODO: Have to be configurable from user 
+        this.tcpPort = 6612;
         this.tcpHost = '127.0.0.1';
         this.isLldbConnected = false; // Track if LLDB is connected to the gdb server
         this.isAnchor = false; // Track if the project is an Anchor project
