@@ -11,7 +11,10 @@
     "categories": [
         "Other"
     ],
-    "activationEvents": [],
+    "activationEvents": [
+        "onLanguage:rust",
+        "workspaceContains:Anchor.toml"
+    ],
     "main": "./src/extension.js",
     "contributes": {
         "configuration": {
@@ -22,6 +25,11 @@
                     "type": "string",
                     "default": "",
                     "description": "Path to the solana-lldb executable"
+                },
+                "gimlet.enableCodeLens": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable Gimlet custom CodeLens in Rust files."
                 }
             }
         },
@@ -47,8 +55,8 @@
                 "title": "Run Gimlet Setup"
             },
             {
-                "command": "extension.DebugBreakpoint",
-                "title": "Debug Breakpoint"
+                "command": "extension.startLitesvmTestDebugging",
+                "title": "Debug LiteSVM Test"
             }
         ],
         "keybindings": [

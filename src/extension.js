@@ -13,7 +13,8 @@ const { CargoSbfBuildStrategy } = require('./build/CargoSbfBuildStrategy');
 const { litesvmBuildStrategy } = require('./build/litesvmBuildStrategy');
 const { debuggerManager } = require('./debuggerManager');
 
-let buildStrategy = null
+const { GimletCodeLensProvider } = require('./lens/GimletCodeLensProvider');
+
 
 function getCommandPath(command) {
     const homeDir = os.homedir();
@@ -232,16 +233,59 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(disposable4);
-
-    const disposable5 = vscode.commands.registerCommand(
-        'extension.DebugBreakpoint',
-        () => {
-            debugBreakpoint();
-        }
+    // Register provider for the Rust files
+    // TODO: extend it to handle ts, js tests too written on `litesvm-node`
+    const codeLensDisposable = vscode.languages.registerCodeLensProvider(
+        { language: 'rust' },
+        new GimletCodeLensProvider()
     );
 
-    context.subscriptions.push(disposable5);
+    const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async () => {
+        
+        try {
+            await startSolanaDebugger();
+            await new Promise(resolve => setTimeout(resolve, 5000));
+
+            const originalValue = process.env.VM_DEBUG_PORT;
+
+            // ENV for SBPF VM, this enables litesvm to create a debug server on this port for remote debugging
+            process.env.VM_DEBUG_PORT = debuggerSession.tcpPort.toString();
+
+            try {
+                // rust-analyzer command to debug reusing the client and runnables it creates initially
+                await vscode.commands.executeCommand("rust-analyzer.debug");
+            } finally {
+                // Cleanup strategy for the ENV after command execution
+                if (originalValue === undefined) {
+                    delete process.env.VM_DEBUG_PORT;
+                } else {
+                    process.env.VM_DEBUG_PORT = originalValue;
+                }
+            }
+        } catch (err) {
+            vscode.window.showErrorMessage(`Failed to debug with Gimlet: ${err.message}`);
+        }
+    })
+
+    vscode.debug.onDidTerminateDebugSession(session => {
+        const lldbTerminal = debuggerManager.getTerminal();
+
+        if (lldbTerminal) {
+            lldbTerminal.dispose();
+
+        }
+    })
+
+    // Add all disposables to context subscriptions
+    context.subscriptions.push(
+        setupDisposable,
+        agaveLedgerDisposable,
+        solanaLLDBDisposable,
+        reRunProcessDisposable,
+        agaveBreakpointDisposable,
+        codeLensDisposable,
+        sbpfDebugDisposable
+    );
 }
 
 function deactivate() {
