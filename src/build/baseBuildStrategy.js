@@ -16,7 +16,7 @@ class BaseBuildStrategy {
         throw new Error('build() must be implemented by subclasses');
     }
 
-    // Base method that all build strategies will use to find the debug executable
+    // Base method that all build strategies are going to use in order to find the executables inside target/deploy 
     findDebugExecutable(files) {
         const executableFile = findExecutableFile(
             files,
