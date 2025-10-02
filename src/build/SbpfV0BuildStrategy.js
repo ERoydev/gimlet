@@ -8,7 +8,7 @@ const os = require('os');
 const buildCommands = require('./buildCommands');
 const { debuggerManager } = require('../debuggerManager');
 
-class CargoSbfBuildStrategy extends BaseBuildStrategy {
+class SbpfV0BuildStrategy extends BaseBuildStrategy {
     constructor(
         workspaceFolder,
         packageName,
@@ -152,5 +152,5 @@ class CargoSbfBuildStrategy extends BaseBuildStrategy {
 }
 
 module.exports = {
-    CargoSbfBuildStrategy,
+    SbpfV0BuildStrategy,
 };

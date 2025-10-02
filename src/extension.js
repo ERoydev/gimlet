@@ -2,15 +2,21 @@ const vscode = require('vscode');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const debuggerSession = require('./state');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
+
 const { resolveGimletConfig } = require('./config');
 const { findSolanaPackageName } = require('./projectStructure');
+
 const buildCommands = require('./build/buildCommands');
+const { SbpfV0BuildStrategy } = require('./build/SbpfV0BuildStrategy');
+const { SbpfV1BuildStrategy } = require('./build/SbpfV1BuildStrategy');
+
 const getFunctionNameAtLine = require('./utils/getFunctionNameAtLine');
 const getTerminalByName = require('./utils/getTerminalByName');
 
-const { CargoSbfBuildStrategy } = require('./build/CargoSbfBuildStrategy');
-const { litesvmBuildStrategy } = require('./build/litesvmBuildStrategy');
+const debuggerSession = require('./state');
 const { debuggerManager } = require('./debuggerManager');
 
 const { GimletCodeLensProvider } = require('./lens/GimletCodeLensProvider');
@@ -117,14 +123,14 @@ async function startSolanaDebugger() {
     }
 
     // TODO: I should implement these in some kind of config where user sets how he wants to use Gimlet.
-    // const buildStrategy = new CargoSbfBuildStrategy(
+    // const buildStrategy = new SbpfV0BuildStrategy(
     //     debuggerSession.globalWorkspaceFolder,
     //     packageName,
     //     depsPath
     // );
-    buildStrategy = new litesvmBuildStrategy(debuggerSession.globalWorkspaceFolder, packageName, depsPath);
+    debuggerSession.buildStrategy = new SbpfV1BuildStrategy(debuggerSession.globalWorkspaceFolder, packageName, depsPath);
 
-    vscode.window.withProgress(
+    return vscode.window.withProgress(
         {
             location: vscode.ProgressLocation.Notification,
             title: 'Building Solana program, setting up debugger...',
@@ -134,15 +140,15 @@ async function startSolanaDebugger() {
             progress.report({ increment: 0, message: 'Starting build...' });
 
             try {
-                if (buildStrategy.buildType === 'V1') {
+                if (debuggerSession.buildStrategy.buildType === 'V1') {
                     // Compile the program with SBF V1, dynamic stack without optimizations
-                    const buildResult = await buildStrategy.build(progress);
+                    const buildResult = await debuggerSession.buildStrategy.build(progress);
                     if (!buildResult) return;
 
                     // Setup the debugger in LLDB terminal
-                    await buildStrategy.setupDebugger(progress);
+                    await debuggerSession.buildStrategy.setupDebugger(progress);
                 } else {
-                    const result = await buildStrategy.build(progress);
+                    const result = await debuggerSession.buildStrategy.build(progress);
                     if (!result) return;
                 }
             } catch (err) {
@@ -187,9 +193,8 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(setupDisposable);
 
-    const disposable = vscode.commands.registerCommand(
+    const agaveLedgerDisposable = vscode.commands.registerCommand(
         'extension.runAgaveLedgerTool',
         () => {
             vscode.window
@@ -206,27 +211,24 @@ function activate(context) {
         }
     );
 
-    context.subscriptions.push(disposable);
 
-    const disposable2 = vscode.commands.registerCommand(
+    const solanaLLDBDisposable = vscode.commands.registerCommand(
         'extension.runSolanaLLDB',
         () => {
             startSolanaDebugger();
         }
     );
 
-    context.subscriptions.push(disposable2);
 
-    const disposable3 = vscode.commands.registerCommand(
+    const reRunProcessDisposable = vscode.commands.registerCommand(
         'extension.reRunProcessLaunch',
         () => {
             reRunProcessLaunch();
         }
     );
 
-    context.subscriptions.push(disposable3);
 
-    const disposable4 = vscode.commands.registerCommand(
+    const agaveBreakpointDisposable = vscode.commands.registerCommand(
         'extension.runAgaveLedgerToolForBreakpoint',
         () => {
             runAgaveLedgerToolForBreakpoint();
@@ -308,24 +310,6 @@ module.exports = {
     activate,
     deactivate,
 };
-
-// TODO: LiteSVM debugging approach
-function debugBreakpoint() {
-    const lldbTerminal = getTerminalByName('Solana LLDB Debugger');
-    if (!lldbTerminal) {
-        vscode.window.showErrorMessage(
-            'Solana LLDB Debugger terminal not found. Use `Run Solana LLDB` from Command Pallette to start it!'
-        );
-        return;
-    }
-
-    debuggerManager.selectBreakpoint(createLitesvmVMInstance);
-}
-
-async function createLitesvmVMInstance(bpObject, functionName) {
-    await buildStrategy.startLitesvmVmWithDebugger(bpObject);
-}
-
 // ============== UTILITIES ==============
 function runAgaveLedgerToolForBreakpoint() {
     // get all breakpoints

@@ -9,7 +9,7 @@ const buildCommands = require('./buildCommands');
 const { debuggerManager, LldbDebuggerManager } = require('../debuggerManager');
 const getTerminalByName = require('../utils/getTerminalByName');
 
-class litesvmBuildStrategy extends BaseBuildStrategy {
+class SbpfV1BuildStrategy extends BaseBuildStrategy {
     constructor(
         workspaceFolder,
         packageName,
@@ -18,7 +18,7 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
     ) {
         super(workspaceFolder, packageName, depsPath);
         this.buildCommand = buildCommand;
-        this._hasShownLitesvmTestMessage = false; // To avoid repeated messages
+        this._breakpointStrategy = LldbDebuggerManager.lineNumberStrategy; // Default to line number strategy
     }
 
     static get BUILD_TYPE() {
@@ -47,7 +47,7 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
 
         return new Promise((resolve) => {
             exec(
-                `cargo-build-sbf --tools-version v1.51 --debug --arch v1`,
+                this.buildCommand,
                 { cwd: this.workspaceFolder },
                 (err, stdout, stderr) => {
                     if (err) {
@@ -77,54 +77,55 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
             return;
         }
 
-        fs.readdir(this.depsPath, (readDirErr, files) => {
-            if (readDirErr) {
-                vscode.window.showErrorMessage(
-                    `Error reading directory: ${readDirErr}`
-                );
-                return;
-            }
-
-            const { executablePath } = this.findDebugExecutable(files);
-            if (!executablePath) {
-                vscode.window.showErrorMessage(`No debug executable found`);
-                return;
-            }
-
-            // Create or reuse terminal
-            const terminal = vscode.window.createTerminal(
-                'Solana LLDB Debugger',
+        let files;
+        try {
+            files = await fs.promises.readdir(this.depsPath);
+        } catch (readDirErr) {
+            vscode.window.showErrorMessage(
+                `Error reading directory: ${readDirErr}`
             );
-            
-            // Set debugger states
-            debuggerManager.setTerminal(terminal);
-            debuggerManager.setBreakpointStrategy(
-                LldbDebuggerManager.lineNumberStrategy // Set to line number strategy
-            ); 
+            return;
+        }
 
-            // Start solana-lldb and set the target executable
-            terminal.show();
-            terminal.sendText('solana-lldb');
-            terminal.sendText(`target create "${executablePath}"`);
-                        
-            // TCP port Polling
-            this.tryConnectToTcpPortWithRetry(60000, 5000) // 1 minute timeout, 1 second interval
-                .then(() => {
-                    this.startConnectionMonitor(5000); // Check connection every 5 seconds
-                })
-                .catch(err => vscode.window.showErrorMessage(err.message));
+        const { executablePath } = this.findDebugExecutable(files);
+        if (!executablePath) {
+            vscode.window.showErrorMessage(`No debug executable found`);
+            return;
+        }
 
-            if (progress)
-                progress.report({
-                    increment: 100,
-                    message: 'Debug session ready!',
-                });
+        // Create or reuse terminal
+        const terminal = vscode.window.createTerminal(
+            'Solana LLDB Debugger',
+        );
+        
+        // Set debugger states
+        debuggerManager.setTerminal(terminal);
+        debuggerManager.setBreakpointStrategy(this._breakpointStrategy); 
 
-            debuggerManager.restoreBreakpoints();
-            debuggerSession.breakpointListenerDisposable =
-                debuggerManager.listenForBreakpointChanges();
+        // Start solana-lldb and set the target executable
+        terminal.show();
+        terminal.sendText('solana-lldb');
+        terminal.sendText(`target create "${executablePath}"`);
+                    
+        // TCP port Polling
+        this.tryConnectToTcpPortWithRetry(60000, 5000) // 1 minute timeout, 1 second interval
+            .then(() => {
+                this.startConnectionMonitor(5000); // Check connection every 5 seconds
+            })
+            .catch(err => vscode.window.showErrorMessage(err.message));
 
-            terminal.onDidClose(() => {
+        if (progress)
+            progress.report({
+                increment: 100,
+                message: 'Debug session ready!',
+            });
+
+        debuggerManager.restoreBreakpoints();
+        debuggerSession.breakpointListenerDisposable =
+        debuggerManager.listenForBreakpointChanges();
+
+        const closeDisposable = vscode.window.onDidCloseTerminal(async (closedTerminal) => {
+            if (closedTerminal === terminal) {
                 if (this._connectionMonitor) {
                     clearInterval(this._connectionMonitor);
                     this._connectionMonitor = null;
@@ -135,7 +136,15 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
                 }
 
                 debuggerSession.isLldbConnected = false;
-            });
+
+                if (debuggerSession.breakpointListenerDisposable) {
+                    debuggerSession.breakpointListenerDisposable.dispose();
+                    debuggerSession.breakpointListenerDisposable = null;
+                }
+
+                // Optionally dispose the listener if you only care about this terminal
+                closeDisposable.dispose();
+            }
         });
     }
 
@@ -171,7 +180,6 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
             // prevent duplicate `gdb-remote` commands
             this.checkDebuggerConnection().then((alreadyConnected) => {
                 if (alreadyConnected) {
-                    this._hasShownLitesvmTestMessage = false; // Reset on success
                     return resolve(true);
                 }
             
@@ -182,17 +190,6 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
                 setTimeout(async () => {
                     try {
                         const connected = await this.checkDebuggerConnection();
-                        if (connected) {
-                            this._hasShownLitesvmTestMessage = false; // Reset on success
-                        } else {
-                            if (!this._hasShownLitesvmTestMessage) {
-                                vscode.window.showErrorMessage(
-                                    'Please run your litesvm tests to enable debugging.'
-                                );
-                                this._hasShownLitesvmTestMessage = true;
-                            }
-                            console.warn('Debugger TCP port connection NOT established.');
-                        }
                         resolve(connected);
                     } catch (err) {
                         vscode.window.showErrorMessage(`Error checking debugger connection: ${err.message}`);
@@ -268,5 +265,5 @@ class litesvmBuildStrategy extends BaseBuildStrategy {
 }
 
 module.exports = {
-    litesvmBuildStrategy,
+    SbpfV1BuildStrategy,
 };
