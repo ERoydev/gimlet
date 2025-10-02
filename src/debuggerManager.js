@@ -11,6 +11,10 @@ class LldbDebuggerManager {
         this.deriveBreakpoint = this.defaultDeriveBreakpoint;
     }
 
+    getTerminal() {
+        return this.terminal;
+    }
+
     setTerminal(terminal) {
         this.terminal = terminal;
         debuggerSession.activeTerminal = terminal;
@@ -85,7 +89,7 @@ class LldbDebuggerManager {
 
     handleAddedBreakpoints(breakpoints) {
         breakpoints.forEach((bp) => {
-            if (!bp.location) return;
+            if (!bp.location || this.isTestBreakpoint(bp)) return;
 
             try {
                 const command = this.deriveBreakpoint(bp);
@@ -104,6 +108,8 @@ class LldbDebuggerManager {
 
     handleRemovedBreakpoints(breakpoints) {
         breakpoints.forEach((bp) => {
+            if (!bp.location || this.isTestBreakpoint(bp)) return;
+            
             const breakpoint = debuggerSession.breakpointMap.get(bp.id);
             if (breakpoint) {
                 this.terminal.sendText(`breakpoint delete ${breakpoint}`);
@@ -112,10 +118,13 @@ class LldbDebuggerManager {
         });
     }
 
-    selectBreakpoint(callback) {
+    selectBreakpoint(callback, breakpointList = null, includeFileName = false) {
         // The callback is a function that will be called with (breakpoint, functionName)
         // So when the user selects the breakpoint, callback is going to be the function starting some operation for the debugging
-        const allBreakpoints = vscode.debug.breakpoints;
+        // breakpointList: optional array of breakpoints to choose from, if null then use all breakpoints in the workspace
+        // includeFileName: if true, passes fileName as third parameter to callback
+
+        const allBreakpoints = breakpointList || vscode.debug.breakpoints;
         let bpObject = null;
 
         if (!allBreakpoints || allBreakpoints.length === 0) {
@@ -130,6 +139,7 @@ class LldbDebuggerManager {
             const bp = allBreakpoints[0];
             if (bp.location) {
                 const line = bp.location.range.start.line + 1;
+                const fileName = path.basename(bp.location.uri.fsPath);
                 const functionName = getFunctionNameAtLine(
                     bp.location.uri.fsPath,
                     line
@@ -137,7 +147,11 @@ class LldbDebuggerManager {
                 bpObject = bp;
 
                 if (functionName) {
-                    callback(bpObject, functionName);
+                    if (includeFileName) {
+                        callback(bpObject, functionName, fileName);
+                    } else {
+                        callback(bpObject, functionName);
+                    }
                 } else {
                     vscode.window.showErrorMessage(
                         'Breakpoint is not inside a function.'
@@ -165,6 +179,7 @@ class LldbDebuggerManager {
                         : 'Not in a function',
                     breakpoint: bp,
                     functionName: functionName,
+                    fileName: fileName,
                 };
             });
 
@@ -175,13 +190,30 @@ class LldbDebuggerManager {
             .then((selected) => {
                 if (selected && selected.functionName) {
                     bpObject = selected.breakpoint;
-                    callback(bpObject, selected.functionName);
+                    if (includeFileName) {
+                        callback(bpObject, selected.functionName, selected.fileName);
+                    } else {
+                        callback(bpObject, selected.functionName);
+                    }
                 } else if (selected) {
                     vscode.window.showErrorMessage(
                         'Selected breakpoint is not inside a function.'
                     );
                 }
             });
+    }
+
+    // TODO: improve test file detection for SolanaLLDB breakpoints
+    isTestBreakpoint(bp) {
+        if (!bp.location) return false;
+        const filePath = bp.location.uri.fsPath;
+        return (
+            filePath.includes('/tests/') ||
+            filePath.includes('\\tests\\') ||
+            filePath.includes('.test.') ||
+            filePath.endsWith('.spec.js') ||
+            filePath.endsWith('.test.js')
+        );
     }
 }
 
