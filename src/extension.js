@@ -123,11 +123,7 @@ async function startSolanaDebugger() {
     }
 
     // TODO: I should implement these in some kind of config where user sets how he wants to use Gimlet.
-    // const buildStrategy = new SbpfV0BuildStrategy(
-    //     debuggerSession.globalWorkspaceFolder,
-    //     packageName,
-    //     depsPath
-    // );
+    // debuggerSession.buildStrategy = new SbpfV0BuildStrategy(debuggerSession.globalWorkspaceFolder, packageName, depsPath);
     debuggerSession.buildStrategy = new SbpfV1BuildStrategy(debuggerSession.globalWorkspaceFolder, packageName, depsPath);
 
     return vscode.window.withProgress(
@@ -177,8 +173,6 @@ function reRunProcessLaunch() {
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
-    // This line of code will only be executed once when your extension is activated
-    console.log('Gimlet is now active!');
 
     // This is automated script to check dependencies for Gimlet
     const setupDisposable = vscode.commands.registerCommand(
@@ -243,8 +237,15 @@ function activate(context) {
     );
 
     const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async () => {
-        
+        if (debuggerSession.isSbpfDebugActive) {
+            vscode.window.showErrorMessage('A Gimlet SBPF debug session is already running. Please stop the current session before starting a new one.');
+            return;
+        }
+
+        debuggerSession.isSbpfDebugActive = true;
         try {
+            // TODO: Ideally, wait for Solana-lldb to finish setup in the terminal before continuing,
+            // but VS Code API doesn't provide a way to detect terminal process state (communication from child process to parent), so we use a fixed delay.
             await startSolanaDebugger();
             await new Promise(resolve => setTimeout(resolve, 5000));
 
@@ -269,12 +270,12 @@ function activate(context) {
         }
     })
 
+    // Event listener for when the debug session ends, to clean up the LLDB terminal
     vscode.debug.onDidTerminateDebugSession(session => {
         const lldbTerminal = debuggerManager.getTerminal();
-
+        debuggerSession.isSbpfDebugActive = false;
         if (lldbTerminal) {
             lldbTerminal.dispose();
-
         }
     })
 
@@ -358,6 +359,7 @@ function runAgaveLedgerTool(
     agaveTerminal.show();
     agaveTerminal.sendText(agaveLedgerToolCommand);
 
+    // TODO: Same problem as described in line 246
     // Connect to the Solana LLDB Debugger terminal
     // Wait some time before connecting LLDB to ensure agave-ledger-tool is ready
     setTimeout(() => {

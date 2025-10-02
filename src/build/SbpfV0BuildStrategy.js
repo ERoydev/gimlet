@@ -96,6 +96,8 @@ class SbpfV0BuildStrategy extends BaseBuildStrategy {
                 terminal.sendText('solana-lldb');
                 terminal.sendText(`target create ${executablePath}`);
 
+                // TODO: Ideally, wait for Solana-lldb to finish setup in the terminal before continuing,
+                // but VS Code API doesn't provide a way to detect terminal process state (communication from child process to parent), so we use a fixed delay.
                 // Give LLDB time to initialize before restoring breakpoints
                 setTimeout(() => {
                     if (progress)

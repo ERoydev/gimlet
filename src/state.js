@@ -15,6 +15,7 @@ class GimletDebuggerSession {
         this.buildStrategy = null;
         
         // TODO: Have to be configurable from user 
+        this.isSbpfDebugActive = false; // Flag to indicate if an SBPF debug session is active, to prevent multiple sessions
         this.tcpPort = 6612;
         this.tcpHost = '127.0.0.1';
         this.isLldbConnected = false; // Track if LLDB is connected to the gdb server

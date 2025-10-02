@@ -136,6 +136,7 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
                 }
 
                 debuggerSession.isLldbConnected = false;
+                debuggerSession.isSbpfDebugActive = false;
 
                 if (debuggerSession.breakpointListenerDisposable) {
                     debuggerSession.breakpointListenerDisposable.dispose();
@@ -185,7 +186,8 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
             
 
                 terminal.sendText(`gdb-remote 127.0.0.1:${debuggerSession.tcpPort}`);
-        
+                
+                // TODO: Ideally, we should find a way to detect when the connection is fully established, but currently no way to get info from child process(terminal from VS CODE API)
                 // Wait a short moment for the connection to establish
                 setTimeout(async () => {
                     try {
