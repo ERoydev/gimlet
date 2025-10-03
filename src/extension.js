@@ -265,11 +265,9 @@ function activate(context) {
                     {
                             type: "node",          
                             request: "launch",      
-                            name: "Debug Mocha + TypeScript Test",  
+                            name: "SBPF Debug TypeScript Tests",  
                             program: "${workspaceFolder}/node_modules/ts-mocha/bin/ts-mocha", 
                             args: [
-                                "-p",
-                                "${workspaceFolder}/tsconfig.json",
                                 "tests/**/*.ts"
                             ],              
                             cwd: "${workspaceFolder}",

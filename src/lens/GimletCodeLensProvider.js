@@ -9,67 +9,78 @@ class GimletCodeLensProvider {
     // Vs code calls this method automatically 
     // whenever it needs to show or update CodeLens annotations in the editor for supported files.
     provideCodeLenses(document) {
-        const lenses = [];
-        const isRust = document.languageId === 'rust';
-        const isTypeScript = document.languageId === 'typescript';
+    const lenses = [];
+    const isRust = document.languageId === 'rust';
+    const isTypeScript = document.languageId === 'typescript';
 
-        for (let i = 0; i < document.lineCount; i++) {
-            const line = document.lineAt(i);
+    if (isRust) {
+        // Use the LSP symbol provider for Rust
+        return vscode.commands.executeCommand(
+            'vscode.executeDocumentSymbolProvider',
+            document.uri
+        ).then(symbols => {
+            if (!symbols) return lenses;
 
-            if (isRust && line.text.includes('fn')) {
-                // Rust function detection
-                const fnMatch = line.text.match(/^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/);
-                if (fnMatch && !line.text.includes("//")) {
-                    const functionName = fnMatch[1];
+            // Recursively process symbols to find test functions
+            const processSymbols = (symbols) => {
+                for (const symbol of symbols) {
+                    if (symbol.kind === vscode.SymbolKind.Function) {
+                        const functionName = symbol.name;
+                        const line = symbol.range.start.line;
 
-                    if (this.isTestFunction(document, i, functionName, isRust)) {
-                        const range = new vscode.Range(i, 0, i, 0);
-                        const functionName = "Placeholder for now"; // TODO: Extract function name properly
-                        
+                        if (this.isTestFunction(document, line, functionName)) {
+                            lenses.push(
+                                new vscode.CodeLens(symbol.range, {
+                                    title: `$(debug-alt) ${LENS_TITLE}`,
+                                    command: "gimlet.debugAtLine",
+                                    arguments: [document, functionName],
+                                })
+                            );
+                        }
+                    }
+                    if (symbol.children && symbol.children.length > 0) {
+                        processSymbols(symbol.children);
+                    }
+                }
+            };
+            processSymbols(symbols);
+            return lenses;
+        });
+        
+    } else if (isTypeScript) {
+        // ...existing TypeScript logic...
+        return vscode.commands.executeCommand(
+            'vscode.executeDocumentSymbolProvider',
+            document.uri
+        ).then(symbols => {
+            if (!symbols) return lenses;
+            // Recursively process symbols to find describe/it/test blocks
+            const processSymbols = (symbols) => {
+                for (const symbol of symbols) {
+                    if (symbol.name && /^(it|test)\b/i.test(symbol.name)) {
+                        const range = symbol.range;
+                        const functionName = this.extractTestNameFromSymbolName(symbol.name);
+
                         lenses.push(
                             new vscode.CodeLens(range, {
                                 title: `$(debug-alt) ${LENS_TITLE}`,
                                 command: "gimlet.debugAtLine",
-                                arguments: [document, functionName], // Arguments
+                                arguments: [document, functionName],
                             })
                         );
                     }
-                }
-            } else if (isTypeScript) {
-                // Use the symbol provider to get all blocks
-                return vscode.commands.executeCommand(
-                    'vscode.executeDocumentSymbolProvider',
-                    document.uri
-                ).then(symbols => {
-                    if (!symbols) return lenses;
-                    // Recursively process symbols to find describe/it/test blocks
-                    const processSymbols = (symbols) => {
-                        for (const symbol of symbols) {
-                            if (symbol.name && /^(it|test)\b/i.test(symbol.name)) {
-                                const range = symbol.range;
-                                const functionName = this.extractTestNameFromSymbolName(symbol.name);
-
-                                lenses.push(
-                                    new vscode.CodeLens(range, {
-                                        title: `$(debug-alt) ${LENS_TITLE}`,
-                                        command: "gimlet.debugAtLine",
-                                        arguments: [document, functionName],
-                                    })
-                                );
-                            }
-                            // Process children recursively
-                            if (symbol.children && symbol.children.length > 0) {
-                                processSymbols(symbol.children);
-                            }
-                        }
+                    if (symbol.children && symbol.children.length > 0) {
+                        processSymbols(symbol.children);
                     }
-                    processSymbols(symbols);
-                    return lenses;
-                });
-            }
-        }
-        return lenses;
+                }
+            };
+            processSymbols(symbols);
+            return lenses;
+        });
     }
+
+    return lenses;
+}
 
     /**
      * Determines if a function is a test function by checking for test attributes
