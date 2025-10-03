@@ -232,16 +232,17 @@ function activate(context) {
     // Register provider for the Rust files
     // TODO: extend it to handle ts, js tests too written on `litesvm-node`
     const codeLensDisposable = vscode.languages.registerCodeLensProvider(
-        { language: 'rust' },
+        [{ language: 'rust' }, { language: 'typescript' }],
         new GimletCodeLensProvider()
     );
 
-    const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async () => {
+    const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document, functionName) => {
         if (debuggerSession.isSbpfDebugActive) {
             vscode.window.showErrorMessage('A Gimlet SBPF debug session is already running. Please stop the current session before starting a new one.');
             return;
         }
 
+        const language = document.languageId;
         debuggerSession.isSbpfDebugActive = true;
         try {
             // TODO: Ideally, wait for Solana-lldb to finish setup in the terminal before continuing,
@@ -255,8 +256,31 @@ function activate(context) {
             process.env.VM_DEBUG_PORT = debuggerSession.tcpPort.toString();
 
             try {
-                // rust-analyzer command to debug reusing the client and runnables it creates initially
-                await vscode.commands.executeCommand("rust-analyzer.debug");
+                if (language == 'rust') {
+                    // rust-analyzer command to debug reusing the client and runnables it creates initially
+                    await vscode.commands.executeCommand("rust-analyzer.debug");
+                } else if (language == 'typescript') {
+                    vscode.debug.startDebugging(
+                        vscode.workspace.workspaceFolders[0], // or undefined for current folder
+                    {
+                            type: "node",          
+                            request: "launch",      
+                            name: "Debug Mocha + TypeScript Test",  
+                            program: "${workspaceFolder}/node_modules/ts-mocha/bin/ts-mocha", 
+                            args: [
+                                "-p",
+                                "${workspaceFolder}/tsconfig.json",
+                                "tests/**/*.ts"
+                            ],              
+                            cwd: "${workspaceFolder}",
+                            env: {
+                                "VM_DEBUG_PORT": debuggerSession.tcpPort.toString()
+                            },
+                            internalConsoleOptions: "openOnSessionStart",
+                            console: "integratedTerminal"
+                        }
+                    );
+                }
             } finally {
                 // Cleanup strategy for the ENV after command execution
                 if (originalValue === undefined) {

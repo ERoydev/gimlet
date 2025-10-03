@@ -3,28 +3,69 @@ const vscode = require('vscode');
 const LENS_TITLE= "Sbpf Debug";
 
 // Custom CodeLens provider that shows "Gimlet Debug" button above Rust test functions
+// TODO: Currently the detection for codeLens is not good enough,
+// Refactor and implement it to use the VS Code LSP symbol provider
 class GimletCodeLensProvider {
-    provideCodeLenses(document, token) {
+    // Vs code calls this method automatically 
+    // whenever it needs to show or update CodeLens annotations in the editor for supported files.
+    provideCodeLenses(document) {
         const lenses = [];
+        const isRust = document.languageId === 'rust';
+        const isTypeScript = document.languageId === 'typescript';
 
         for (let i = 0; i < document.lineCount; i++) {
             const line = document.lineAt(i);
 
-            // More robust function detection using regex
-            const fnMatch = line.text.match(/^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/);
-            if (fnMatch && !line.text.includes("//")) {
-                const functionName = fnMatch[1];
+            if (isRust && line.text.includes('fn')) {
+                // Rust function detection
+                const fnMatch = line.text.match(/^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/);
+                if (fnMatch && !line.text.includes("//")) {
+                    const functionName = fnMatch[1];
 
-                if (this.isTestFunction(document, i, functionName)) {
-                    const range = new vscode.Range(i, 0, i, 0);
-                    lenses.push(
-                        new vscode.CodeLens(range, {
-                            title: `$(debug-alt) ${LENS_TITLE}`,
-                            command: "gimlet.debugAtLine",
-                            arguments: [document, i],
-                        })
-                    );
+                    if (this.isTestFunction(document, i, functionName, isRust)) {
+                        const range = new vscode.Range(i, 0, i, 0);
+                        const functionName = "Placeholder for now"; // TODO: Extract function name properly
+                        
+                        lenses.push(
+                            new vscode.CodeLens(range, {
+                                title: `$(debug-alt) ${LENS_TITLE}`,
+                                command: "gimlet.debugAtLine",
+                                arguments: [document, functionName], // Arguments
+                            })
+                        );
+                    }
                 }
+            } else if (isTypeScript) {
+                // Use the symbol provider to get all blocks
+                return vscode.commands.executeCommand(
+                    'vscode.executeDocumentSymbolProvider',
+                    document.uri
+                ).then(symbols => {
+                    if (!symbols) return lenses;
+                    // Recursively process symbols to find describe/it/test blocks
+                    const processSymbols = (symbols) => {
+                        for (const symbol of symbols) {
+                            if (symbol.name && /^(it|test)\b/i.test(symbol.name)) {
+                                const range = symbol.range;
+                                const functionName = this.extractTestNameFromSymbolName(symbol.name);
+
+                                lenses.push(
+                                    new vscode.CodeLens(range, {
+                                        title: `$(debug-alt) ${LENS_TITLE}`,
+                                        command: "gimlet.debugAtLine",
+                                        arguments: [document, functionName],
+                                    })
+                                );
+                            }
+                            // Process children recursively
+                            if (symbol.children && symbol.children.length > 0) {
+                                processSymbols(symbol.children);
+                            }
+                        }
+                    }
+                    processSymbols(symbols);
+                    return lenses;
+                });
             }
         }
         return lenses;
@@ -82,6 +123,12 @@ class GimletCodeLensProvider {
         }
 
         return false;
+    }
+
+    extractTestNameFromSymbolName(symbolName) {
+        // Matches it("name"), test('name'), describe(`name`)
+        const match = symbolName.match(/^(?:it|test|describe)\s*\(\s*['"`](.+?)['"`]\s*\)/);
+        return match ? match[1] : symbolName;
     }
 }
 
