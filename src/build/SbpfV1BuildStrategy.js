@@ -3,8 +3,6 @@ const debuggerSession = require('../state');
 const vscode = require('vscode');
 const fs = require('fs');
 const { exec } = require('child_process');
-const path = require('path');
-const os = require('os');
 const buildCommands = require('./buildCommands');
 
 class SbpfV1BuildStrategy extends BaseBuildStrategy {

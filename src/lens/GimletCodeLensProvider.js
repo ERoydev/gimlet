@@ -3,8 +3,6 @@ const vscode = require('vscode');
 const LENS_TITLE= "Sbpf Debug";
 
 // Custom CodeLens provider that shows "Gimlet Debug" button above Rust test functions
-// TODO: Currently the detection for codeLens is not good enough,
-// Refactor and implement it to use the VS Code LSP symbol provider
 class GimletCodeLensProvider {
     // Vs code calls this method automatically 
     // whenever it needs to show or update CodeLens annotations in the editor for supported files.
