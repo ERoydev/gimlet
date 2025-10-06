@@ -83,15 +83,22 @@ function activate(context) {
         new GimletCodeLensProvider()
     );
 
+    vscode.debug.onDidTerminateDebugSession(session => {
+        // console.log(`Debug session terminated: ${session.id}`);
+        // console.log(`Current Gimlet debug session ID: ${debuggerSession.debugSessionId}`);
+        if (session.id === debuggerSession.debugSessionId) {
+            debuggerSession.debugSessionId = null;
+            lldbLibraryManager.restoreLibrary();
+        }
+    });
+
     const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document, functionName) => {
-        // if (debuggerSession.isSbpfDebugActive) {
-        //     vscode.window.showErrorMessage('A Gimlet SBPF debug session is already running. Please stop the current session before starting a new one.');
-        //     return;
-        // }
-        console.log('STARTED')
+        if (debuggerSession.debugSessionId) {
+            vscode.window.showErrorMessage('A Gimlet debug session is already running. Please stop the current session before starting a new one.');
+            return;
+        }
 
         const language = document.languageId;
-        // debuggerSession.isSbpfDebugActive = true;
         try {
             await SbpfCompile();
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -105,9 +112,17 @@ function activate(context) {
 
             try {
                 if (language == 'rust') {
+                    const debugListener = vscode.debug.onDidStartDebugSession(session => {
+                        if (session.type === 'lldb' || session.type === 'rust-analyzer') {
+                            debuggerSession.debugSessionId = session.id;
+                            // You can also store the session object if needed
+                        }
+                    });
                     // rust-analyzer command to debug reusing the client and runnables it creates initially
                     const result = await vscode.commands.executeCommand("rust-analyzer.debug");
                     console.log('Debug command result:', result);
+
+                    debugListener.dispose();
                     
                     if (!result) {
                         vscode.window.showErrorMessage('Failed to start debug session. Please ensure you have selected a runnable in the rust-analyzer prompt.');
@@ -166,7 +181,7 @@ function deactivate() {
         debuggerSession.functionAddressMapPath = null; // Clear the path after deletion
     }
 
-    lldbLibraryManager.restoreLibrary();
+    lldbLibraryManager.disableLibrary();
 }
 
 function getTestRunnerFromAnchorToml(workspaceFolder) {
@@ -177,31 +192,48 @@ function getTestRunnerFromAnchorToml(workspaceFolder) {
     const tomlContent = fs.readFileSync(anchorTomlPath, 'utf8');
     const config = toml.parse(tomlContent);
 
-    // Example: If you have a [scripts] section with a test runner
     if (config.scripts && config.scripts.test) {
-        return config.scripts.test; // Adjust this to match your TOML structure
+        // Example: "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+        const testScript = config.scripts.test;
+        // Extract runner and args (simple heuristic)
+        const match = testScript.match(/(?:yarn run |npx )?([^\s]+)(.*)/);
+        if (match) {
+            const runner = match[1]; // e.g., ts-mocha
+            const args = match[2].trim().split(/\s+/); // split args
+            return { runner, args };
+        }
     }
-
-    // Fallback if not found
     return null;
 }
 
 function getTypescriptTestLaunchConfig() {
+    const workspaceFolder = debuggerSession.globalWorkspaceFolder;
+    const runnerInfo = getTestRunnerFromAnchorToml(workspaceFolder);
+
+    let program;
+    if (runnerInfo) {
+        // Try to resolve runner path in node_modules/.bin
+        program = path.join(workspaceFolder, 'node_modules', runnerInfo.runner, 'bin', runnerInfo.runner);
+    } else {
+        // Fallback to ts-mocha
+        program = path.join(workspaceFolder, 'node_modules/ts-mocha/bin/ts-mocha');
+    }
+
     const launchConfig = {
-        type: "node",          
-        request: "launch",      
-        name: "SBPF Debug TypeScript Tests",  
-        program: "${workspaceFolder}/node_modules/ts-mocha/bin/ts-mocha", // TODO: Handle all possible test runners, maybe take from Anchor.toml scripts
+        type: "node",
+        request: "launch",
+        name: "SBPF Debug TypeScript Tests",
+        program,
         args: [
             "tests/**/*.ts"
-        ],              
+        ], 
         cwd: "${workspaceFolder}",
         env: {
             "VM_DEBUG_PORT": debuggerSession.tcpPort.toString()
         },
         internalConsoleOptions: "openOnSessionStart",
         console: "integratedTerminal"
-    }
+    };
     return launchConfig;
 }
 
