@@ -3,19 +3,21 @@ const path = require('path');
 const fs = require('fs');
 const toml = require('toml');
 
-const { resolveGimletConfig } = require('./config');
+const gimletConfigManager  = require('./config');
+
 const { findSolanaPackageName } = require('./projectStructure');
 
 const { SbpfV1BuildStrategy } = require('./build/SbpfV1BuildStrategy');
-const debuggerSession = require('./state');
 const { GimletCodeLensProvider } = require('./lens/GimletCodeLensProvider');
 
-const { exec } = require('child_process');
+const { lldbSettingsManager, rustAnalyzerSettingsManager, editorSettingsManager } = require('./VsCodeSettingsManager');
 
-const { lldbLibraryManager } = require('./LldbLibraryManager');
+const debuggerSession = require('./state');
+const portManager = require('./PortManager')
+
 
 async function SbpfCompile() {
-    const { workspaceFolder, depsPath } = await resolveGimletConfig();
+    const { workspaceFolder, depsPath } = await gimletConfigManager.resolveGimletConfig();
 
     debuggerSession.selectedAnchorProgramName = null; // Reset the selected program name
 
@@ -61,13 +63,21 @@ async function SbpfCompile() {
 /**
  * @param {vscode.ExtensionContext} context
  */
-function activate(context) {
+async function activate(context) {
+
+    gimletConfigManager.ensureGimletConfig();
+    gimletConfigManager.watchGimletConfig(context);
+
+    // Set necessary VS Code settings for optimal debugging experience
+    rustAnalyzerSettingsManager.set('debug.engine', 'vadimcn.vscode-lldb');
+    editorSettingsManager.set('codeLens', true);
+    
 
     // This is automated script to check dependencies for Gimlet
     const setupDisposable = vscode.commands.registerCommand(
         'extension.runGimletSetup',
         () => {
-            const scriptPath = path.join(__dirname, 'scripts/gimlet-setup.sh');
+            const scriptPath = path.join(context.extensionPath, 'scripts/gimlet-setup.sh');
 
             // Create a terminal to show the output
             const terminal = vscode.window.createTerminal('Gimlet Setup');
@@ -77,18 +87,15 @@ function activate(context) {
     );
 
     // Register provider for the Rust files
-    // TODO: extend it to handle ts, js tests too written on `litesvm-node`
     const codeLensDisposable = vscode.languages.registerCodeLensProvider(
         [{ language: 'rust' }, { language: 'typescript' }],
         new GimletCodeLensProvider()
     );
 
     vscode.debug.onDidTerminateDebugSession(session => {
-        // console.log(`Debug session terminated: ${session.id}`);
-        // console.log(`Current Gimlet debug session ID: ${debuggerSession.debugSessionId}`);
         if (session.id === debuggerSession.debugSessionId) {
             debuggerSession.debugSessionId = null;
-            lldbLibraryManager.restoreLibrary();
+            lldbSettingsManager.restore('library');
         }
     });
 
@@ -96,6 +103,14 @@ function activate(context) {
         if (debuggerSession.debugSessionId) {
             vscode.window.showErrorMessage('A Gimlet debug session is already running. Please stop the current session before starting a new one.');
             return;
+        }
+
+        const available = await portManager.isPortAvailable(debuggerSession.tcpPort);
+        if (!available) {
+            vscode.window.showErrorMessage(
+                `Port ${debuggerSession.tcpPort} is already in use by another service. Please choose a different port in your Gimlet config.`
+            );
+            return; // Abort debug setup
         }
 
         const language = document.languageId;
@@ -108,19 +123,17 @@ function activate(context) {
             process.env.VM_DEBUG_PORT = debuggerSession.tcpPort.toString();
 
             // remove the lldb.library setting to allow rust-analyzer to work properly
-            await lldbLibraryManager.disableLibrary();
+            await lldbSettingsManager.disable('library');
 
             try {
                 if (language == 'rust') {
                     const debugListener = vscode.debug.onDidStartDebugSession(session => {
                         if (session.type === 'lldb' || session.type === 'rust-analyzer') {
                             debuggerSession.debugSessionId = session.id;
-                            // You can also store the session object if needed
                         }
                     });
                     // rust-analyzer command to debug reusing the client and runnables it creates initially
                     const result = await vscode.commands.executeCommand("rust-analyzer.debug");
-                    console.log('Debug command result:', result);
 
                     debugListener.dispose();
                     
@@ -129,9 +142,9 @@ function activate(context) {
                         return;
                     }
 
-                    await lldbLibraryManager.setLibrary();
+                    await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
                     const launchConfig = getLaunchConfigForSolanaLldb();
-                    waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig);
+                    portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig);
 
                 } else if (language == 'typescript') {
                     const launchConfig = getTypescriptTestLaunchConfig();
@@ -140,10 +153,10 @@ function activate(context) {
                         launchConfig
                     );
 
-                    await lldbLibraryManager.setLibrary();
+                    await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
 
                     const solanaLLdbLaunchConfig = getLaunchConfigForSolanaLldb();
-                    waitAndStartDebug(vscode.workspace.workspaceFolders[0], solanaLLdbLaunchConfig);
+                    portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], solanaLLdbLaunchConfig);
                 }
             } finally {
                 // Cleanup strategy for the ENV after command execution
@@ -156,8 +169,8 @@ function activate(context) {
         } catch (err) {
             vscode.window.showErrorMessage(`Failed to debug with Gimlet: ${err.message}`);
         }
-    })
-
+    });
+        
     // Add all disposables to context subscriptions
     context.subscriptions.push(
         setupDisposable,
@@ -181,7 +194,9 @@ function deactivate() {
         debuggerSession.functionAddressMapPath = null; // Clear the path after deletion
     }
 
-    lldbLibraryManager.disableLibrary();
+    lldbSettingsManager.restore('library');
+    rustAnalyzerSettingsManager.restore('debug.engine');
+    editorSettingsManager.restore('codeLens');
 }
 
 function getTestRunnerFromAnchorToml(workspaceFolder) {
@@ -248,44 +263,6 @@ function getLaunchConfigForSolanaLldb() {
         processCreateCommands: [`gdb-remote 127.0.0.1:${debuggerSession.tcpPort}`],
     };
     return launchConfig
-}
-
-// Check if the given TCP port is open (LISTEN state)
-function isPortOpen() {
-    return new Promise((resolve) => {
-        const port = debuggerSession.tcpPort;
-        exec(
-            `netstat -nat | grep -E '[:|.]${port}\\b' | grep 'LISTEN' | wc -l`,
-            (err, stdout, stderr) => {
-                const isOpen = stdout.trim() === '1';
-                resolve(isOpen);
-            }
-        );
-    });
-}
-
-const pollingActiveMap = {};
-
-// Polling function to check port status and start debug session
-async function waitAndStartDebug(workspaceFolder, launchConfig) {
-    const sessionName = launchConfig.name;
-    if (pollingActiveMap[sessionName]) return; // Prevent multiple loops for same session name
-    pollingActiveMap[sessionName] = true;
-
-    while (pollingActiveMap[sessionName]) {
-        const isOpen = await isPortOpen();
-
-        // Only start if port is LISTEN and no session is running
-        const alreadyRunning = Array.isArray(vscode.debug.sessions)
-            ? vscode.debug.sessions.some(session => session.name === sessionName)
-            : false;
-
-        if (isOpen && !alreadyRunning) {
-            await vscode.debug.startDebugging(workspaceFolder, launchConfig);
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 3000)); // Poll every 3 seconds
-    }
 }
 
 module.exports = {
