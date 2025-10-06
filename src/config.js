@@ -1,49 +1,97 @@
 const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
-
 const debuggerSession = require('./state');
-// A module that knows how to: resolve workspace paths, detect Cargo.toml, figure out package name and Anchor structure
-
-/**
- * @typedef {Object} GimletConfig
- * @property {string} workspaceFolder
- * @property {string} depsPath
- * @property {string} inputPath
- * @property {string} packageName
- * @property {boolean} isAnchor
- * @property {string} [selectedProgram]
- */
-
-/** @type {GimletConfig} */
-// eslint-disable-next-line no-unused-vars
-const config = {
-    workspaceFolder: '',
-    depsPath: '',
-    inputPath: '',
-    packageName: '',
-    isAnchor: false,
-    selectedProgram: undefined,
-};
-
-async function resolveGimletConfig() {
-    const workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
-    if (!workspaceFolder) {
-        vscode.window.showErrorMessage('No workspace folder found.');
-        return null;
+class GimletConfigManager {
+    constructor() {
+        this.workspaceFolder = null;
+        this.depsPath = null;
+        this.inputPath = null;
     }
-    debuggerSession.globalWorkspaceFolder = workspaceFolder;
 
-    const depsPath = path.join(workspaceFolder, 'target', 'deploy');
-    const inputPath = path.join(workspaceFolder, 'input');
-    debuggerSession.globalInputPath = inputPath;
+    resolveWorkspaceFolder() {
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) {
+            vscode.window.showErrorMessage('No workspace folder found.');
+            return null;
+        }
+        this.workspaceFolder = folders[0].uri.fsPath;
+        debuggerSession.globalWorkspaceFolder = this.workspaceFolder;
+        return this.workspaceFolder;
+    }
 
-    return {
-        workspaceFolder,
-        depsPath,
-    };
+    resolveGimletConfig() {
+        const workspaceFolder = this.resolveWorkspaceFolder();
+        if (!workspaceFolder) return null;
+
+        this.depsPath = path.join(workspaceFolder, 'target', 'deploy');
+        this.inputPath = path.join(workspaceFolder, 'input');
+        debuggerSession.globalInputPath = this.inputPath;
+
+        return {
+            workspaceFolder: this.workspaceFolder,
+            depsPath: this.depsPath,
+            inputPath: this.inputPath
+        };
+    }
+
+    ensureGimletConfig() {
+        const workspaceFolder = this.resolveWorkspaceFolder();
+        if (!workspaceFolder) return null;
+
+        const vscodeDir = path.join(workspaceFolder, '.vscode');
+        const configPath = path.join(vscodeDir, 'gimlet.json');
+
+        const defaultConfig = {
+            tcpPort: debuggerSession.tcpPort,
+            lldbLibrary: debuggerSession.lldbLibrary
+        };
+
+        if (!fs.existsSync(vscodeDir)) {
+            fs.mkdirSync(vscodeDir);
+        }
+
+        let configToWrite = defaultConfig;
+        if (fs.existsSync(configPath)) {
+            try {
+                const existingConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                // Merge existing config with defaults (existing values take precedence)
+                configToWrite = { ...defaultConfig, ...existingConfig };
+            } catch (err) {
+                vscode.window.showErrorMessage('Failed to read existing Gimlet config, recreating: ' + err.message);
+            }
+        }
+
+        fs.writeFileSync(configPath, JSON.stringify(configToWrite, null, 4));
+        return configPath;
+    }
+
+    watchGimletConfig(context) {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workspaceFolder) return;
+
+        const configPath = path.join(workspaceFolder, '.vscode', 'gimlet.json');
+        const watcher = vscode.workspace.createFileSystemWatcher(configPath);
+
+        watcher.onDidChange(() => {
+            try {
+                const configContent = fs.readFileSync(configPath, 'utf8');
+                const config = JSON.parse(configContent);
+
+                // Update your state here
+                if (config.tcpPort) debuggerSession.tcpPort = config.tcpPort;
+                if (config.lldbLibrary) debuggerSession.lldbLibrary = config.lldbLibrary;
+
+                vscode.window.showInformationMessage('Gimlet config updated and state refreshed.');
+            } catch (err) {
+                vscode.window.showErrorMessage('Failed to reload Gimlet config: ' + err.message);
+            }
+        });
+
+        context.subscriptions.push(watcher);
+    }
 }
 
-module.exports = {
-    resolveGimletConfig,
-};
+const gimletConfigManager = new GimletConfigManager();
+
+module.exports = gimletConfigManager;
