@@ -8,10 +8,6 @@ class BaseBuildStrategy {
         this.depsPath = depsPath;
     }
 
-    static get FUNCTION_ADDRESS_MAP_NAME() {
-        return 'function_address_map.txt';
-    }
-
     async build(progress) {
         throw new Error('build() must be implemented by subclasses');
     }
