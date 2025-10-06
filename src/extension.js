@@ -1,109 +1,23 @@
 const vscode = require('vscode');
-const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const { exec } = require('child_process');
-const { promisify } = require('util');
-const execAsync = promisify(exec);
+const toml = require('toml');
 
 const { resolveGimletConfig } = require('./config');
 const { findSolanaPackageName } = require('./projectStructure');
 
-const buildCommands = require('./build/buildCommands');
-const { SbpfV0BuildStrategy } = require('./build/SbpfV0BuildStrategy');
 const { SbpfV1BuildStrategy } = require('./build/SbpfV1BuildStrategy');
-
-const getFunctionNameAtLine = require('./utils/getFunctionNameAtLine');
-const getTerminalByName = require('./utils/getTerminalByName');
-
 const debuggerSession = require('./state');
-const { debuggerManager } = require('./debuggerManager');
-
 const { GimletCodeLensProvider } = require('./lens/GimletCodeLensProvider');
 
+const { exec } = require('child_process');
 
-function getCommandPath(command) {
-    const homeDir = os.homedir();
-    const agaveLedgerToolPath = path.join(
-        homeDir,
-        '.local',
-        'share',
-        'solana',
-        'install',
-        'active_release',
-        'bin',
-        'agave-ledger-tool'
-    );
+const { lldbLibraryManager } = require('./LldbLibraryManager');
 
-    let solanalldbPath = path.join(
-        homeDir,
-        '.local',
-        'share',
-        'solana',
-        'install',
-        'active_release',
-        'bin',
-        'sdk',
-        'sbf',
-        'dependencies',
-        'platform-tools',
-        'llvm',
-        'bin',
-        'solana-lldb'
-    );
-
-    const customSolanalldbPath = vscode.workspace
-        .getConfiguration('solanaDebugger')
-        .get('solanaLldbPath');
-    if (customSolanalldbPath) {
-        solanalldbPath = customSolanalldbPath;
-    }
-
-    if (command.includes('agave-ledger-tool')) {
-        return agaveLedgerToolPath;
-    } else if (command.includes('solana-lldb')) {
-        return solanalldbPath;
-    } else {
-        vscode.window.showErrorMessage(`Unknown command: ${command}`);
-        return '';
-    }
-}
-
-function runCommand(command, args = '') {
-    const commandPath = getCommandPath(command);
-
-    if (!commandPath) {
-        vscode.window.showErrorMessage(
-            `Command path for ${command} not found.`
-        );
-        return;
-    }
-
-    const terminal = vscode.window.createTerminal(`Run ${command}`);
-    terminal.show();
-    terminal.sendText(`${commandPath} ${args}`);
-}
-
-async function startSolanaDebugger() {
+async function SbpfCompile() {
     const { workspaceFolder, depsPath } = await resolveGimletConfig();
 
-    const projectFolderName = path.basename(workspaceFolder);
-
-    debuggerSession.isLldbConnected = false; // Reset the connection status
     debuggerSession.selectedAnchorProgramName = null; // Reset the selected program name
-
-    if (debuggerSession.breakpointListenerDisposable) {
-        debuggerSession.breakpointListenerDisposable.dispose();
-        debuggerSession.breakpointListenerDisposable = null;
-    }
-
-    debuggerSession.breakpointMap.clear();
-
-    vscode.window.terminals.forEach((terminal) => {
-        if (terminal.name === 'Solana LLDB Debugger') {
-            terminal.dispose();
-        }
-    });
 
     if (!fs.existsSync(depsPath)) {
         vscode.window.showInformationMessage(
@@ -122,8 +36,6 @@ async function startSolanaDebugger() {
         return;
     }
 
-    // TODO: I should implement these in some kind of config where user sets how he wants to use Gimlet.
-    // debuggerSession.buildStrategy = new SbpfV0BuildStrategy(debuggerSession.globalWorkspaceFolder, packageName, depsPath);
     debuggerSession.buildStrategy = new SbpfV1BuildStrategy(debuggerSession.globalWorkspaceFolder, packageName, depsPath);
 
     return vscode.window.withProgress(
@@ -136,36 +48,13 @@ async function startSolanaDebugger() {
             progress.report({ increment: 0, message: 'Starting build...' });
 
             try {
-                if (debuggerSession.buildStrategy.buildType === 'V1') {
-                    // Compile the program with SBF V1, dynamic stack without optimizations
-                    const buildResult = await debuggerSession.buildStrategy.build(progress);
-                    if (!buildResult) return;
-
-                    // Setup the debugger in LLDB terminal
-                    await debuggerSession.buildStrategy.setupDebugger(progress);
-                } else {
-                    const result = await debuggerSession.buildStrategy.build(progress);
-                    if (!result) return;
-                }
+                const buildResult = await debuggerSession.buildStrategy.build(progress);
+                if (!buildResult) return;
             } catch (err) {
                 vscode.window.showErrorMessage(`Build failed: ${err.message}`);
             }
         }
     );
-}
-
-function reRunProcessLaunch() {
-    const terminal = getTerminalByName('Solana LLDB Debugger');
-
-    if (terminal) {
-        debuggerSession.activeTerminal = terminal;
-        terminal.sendText('continue'); // Resume the process in the LLDB debugger (process launch -- --nocapture)
-    } else {
-        vscode.window.showErrorMessage(
-            'Solana LLDB Debugger terminal not found.'
-        );
-        startSolanaDebugger();
-    }
 }
 
 // ============== VSCODE COMMANDS ==============
@@ -180,52 +69,10 @@ function activate(context) {
         () => {
             const scriptPath = path.join(__dirname, 'scripts/gimlet-setup.sh');
 
-            // Create a terminal to show the beautiful output
+            // Create a terminal to show the output
             const terminal = vscode.window.createTerminal('Gimlet Setup');
             terminal.show();
             terminal.sendText(`bash "${scriptPath}"`);
-        }
-    );
-
-
-    const agaveLedgerDisposable = vscode.commands.registerCommand(
-        'extension.runAgaveLedgerTool',
-        () => {
-            vscode.window
-                .showInputBox({ prompt: 'Enter agave-ledger-tool subcommand' })
-                .then((subcommand) => {
-                    if (subcommand) {
-                        runCommand('agave-ledger-tool', subcommand);
-                    } else {
-                        vscode.window.showErrorMessage(
-                            'No subcommand provided.'
-                        );
-                    }
-                });
-        }
-    );
-
-
-    const solanaLLDBDisposable = vscode.commands.registerCommand(
-        'extension.runSolanaLLDB',
-        () => {
-            startSolanaDebugger();
-        }
-    );
-
-
-    const reRunProcessDisposable = vscode.commands.registerCommand(
-        'extension.reRunProcessLaunch',
-        () => {
-            reRunProcessLaunch();
-        }
-    );
-
-
-    const agaveBreakpointDisposable = vscode.commands.registerCommand(
-        'extension.runAgaveLedgerToolForBreakpoint',
-        () => {
-            runAgaveLedgerToolForBreakpoint();
         }
     );
 
@@ -237,47 +84,51 @@ function activate(context) {
     );
 
     const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document, functionName) => {
-        if (debuggerSession.isSbpfDebugActive) {
-            vscode.window.showErrorMessage('A Gimlet SBPF debug session is already running. Please stop the current session before starting a new one.');
-            return;
-        }
+        // if (debuggerSession.isSbpfDebugActive) {
+        //     vscode.window.showErrorMessage('A Gimlet SBPF debug session is already running. Please stop the current session before starting a new one.');
+        //     return;
+        // }
+        console.log('STARTED')
 
         const language = document.languageId;
-        debuggerSession.isSbpfDebugActive = true;
+        // debuggerSession.isSbpfDebugActive = true;
         try {
-            // TODO: Ideally, wait for Solana-lldb to finish setup in the terminal before continuing,
-            // but VS Code API doesn't provide a way to detect terminal process state (communication from child process to parent), so we use a fixed delay.
-            await startSolanaDebugger();
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            await SbpfCompile();
+            await new Promise(resolve => setTimeout(resolve, 500));
 
             const originalValue = process.env.VM_DEBUG_PORT;
-
             // ENV for SBPF VM, this enables litesvm to create a debug server on this port for remote debugging
             process.env.VM_DEBUG_PORT = debuggerSession.tcpPort.toString();
+
+            // remove the lldb.library setting to allow rust-analyzer to work properly
+            await lldbLibraryManager.disableLibrary();
 
             try {
                 if (language == 'rust') {
                     // rust-analyzer command to debug reusing the client and runnables it creates initially
-                    await vscode.commands.executeCommand("rust-analyzer.debug");
+                    const result = await vscode.commands.executeCommand("rust-analyzer.debug");
+                    console.log('Debug command result:', result);
+                    
+                    if (!result) {
+                        vscode.window.showErrorMessage('Failed to start debug session. Please ensure you have selected a runnable in the rust-analyzer prompt.');
+                        return;
+                    }
+
+                    await lldbLibraryManager.setLibrary();
+                    const launchConfig = getLaunchConfigForSolanaLldb();
+                    waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig);
+
                 } else if (language == 'typescript') {
+                    const launchConfig = getTypescriptTestLaunchConfig();
                     vscode.debug.startDebugging(
                         vscode.workspace.workspaceFolders[0], // or undefined for current folder
-                    {
-                            type: "node",          
-                            request: "launch",      
-                            name: "SBPF Debug TypeScript Tests",  
-                            program: "${workspaceFolder}/node_modules/ts-mocha/bin/ts-mocha", 
-                            args: [
-                                "tests/**/*.ts"
-                            ],              
-                            cwd: "${workspaceFolder}",
-                            env: {
-                                "VM_DEBUG_PORT": debuggerSession.tcpPort.toString()
-                            },
-                            internalConsoleOptions: "openOnSessionStart",
-                            console: "integratedTerminal"
-                        }
+                        launchConfig
                     );
+
+                    await lldbLibraryManager.setLibrary();
+
+                    const solanaLLdbLaunchConfig = getLaunchConfigForSolanaLldb();
+                    waitAndStartDebug(vscode.workspace.workspaceFolders[0], solanaLLdbLaunchConfig);
                 }
             } finally {
                 // Cleanup strategy for the ENV after command execution
@@ -292,22 +143,9 @@ function activate(context) {
         }
     })
 
-    // Event listener for when the debug session ends, to clean up the LLDB terminal
-    vscode.debug.onDidTerminateDebugSession(session => {
-        const lldbTerminal = debuggerManager.getTerminal();
-        debuggerSession.isSbpfDebugActive = false;
-        if (lldbTerminal) {
-            lldbTerminal.dispose();
-        }
-    })
-
     // Add all disposables to context subscriptions
     context.subscriptions.push(
         setupDisposable,
-        agaveLedgerDisposable,
-        solanaLLDBDisposable,
-        reRunProcessDisposable,
-        agaveBreakpointDisposable,
         codeLensDisposable,
         sbpfDebugDisposable
     );
@@ -327,86 +165,99 @@ function deactivate() {
         fs.unlinkSync(debuggerSession.functionAddressMapPath); // Delete the function address map file
         debuggerSession.functionAddressMapPath = null; // Clear the path after deletion
     }
+
+    lldbLibraryManager.restoreLibrary();
+}
+
+function getTestRunnerFromAnchorToml(workspaceFolder) {
+    const anchorTomlPath = path.join(workspaceFolder, 'Anchor.toml');
+    if (!fs.existsSync(anchorTomlPath)) {
+        return null;
+    }
+    const tomlContent = fs.readFileSync(anchorTomlPath, 'utf8');
+    const config = toml.parse(tomlContent);
+
+    // Example: If you have a [scripts] section with a test runner
+    if (config.scripts && config.scripts.test) {
+        return config.scripts.test; // Adjust this to match your TOML structure
+    }
+
+    // Fallback if not found
+    return null;
+}
+
+function getTypescriptTestLaunchConfig() {
+    const launchConfig = {
+        type: "node",          
+        request: "launch",      
+        name: "SBPF Debug TypeScript Tests",  
+        program: "${workspaceFolder}/node_modules/ts-mocha/bin/ts-mocha", // TODO: Handle all possible test runners, maybe take from Anchor.toml scripts
+        args: [
+            "tests/**/*.ts"
+        ],              
+        cwd: "${workspaceFolder}",
+        env: {
+            "VM_DEBUG_PORT": debuggerSession.tcpPort.toString()
+        },
+        internalConsoleOptions: "openOnSessionStart",
+        console: "integratedTerminal"
+    }
+    return launchConfig;
+}
+
+function getLaunchConfigForSolanaLldb() {
+    const launchConfig = {
+        type: "lldb",
+        request: "launch",
+        name: "Sbpf Debug",
+        targetCreateCommands: [
+            `target create ${debuggerSession.globalExecutablePath}`,
+        ],
+        processCreateCommands: [`gdb-remote 127.0.0.1:${debuggerSession.tcpPort}`],
+    };
+    return launchConfig
+}
+
+// Check if the given TCP port is open (LISTEN state)
+function isPortOpen() {
+    return new Promise((resolve) => {
+        const port = debuggerSession.tcpPort;
+        exec(
+            `netstat -nat | grep -E '[:|.]${port}\\b' | grep 'LISTEN' | wc -l`,
+            (err, stdout, stderr) => {
+                const isOpen = stdout.trim() === '1';
+                resolve(isOpen);
+            }
+        );
+    });
+}
+
+const pollingActiveMap = {};
+
+// Polling function to check port status and start debug session
+async function waitAndStartDebug(workspaceFolder, launchConfig) {
+    const sessionName = launchConfig.name;
+    if (pollingActiveMap[sessionName]) return; // Prevent multiple loops for same session name
+    pollingActiveMap[sessionName] = true;
+
+    while (pollingActiveMap[sessionName]) {
+        const isOpen = await isPortOpen();
+
+        // Only start if port is LISTEN and no session is running
+        const alreadyRunning = Array.isArray(vscode.debug.sessions)
+            ? vscode.debug.sessions.some(session => session.name === sessionName)
+            : false;
+
+        if (isOpen && !alreadyRunning) {
+            await vscode.debug.startDebugging(workspaceFolder, launchConfig);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Poll every 3 seconds
+    }
 }
 
 module.exports = {
     activate,
     deactivate,
 };
-// ============== UTILITIES ==============
-function runAgaveLedgerToolForBreakpoint() {
-    // get all breakpoints
-    const latestTerminal = getTerminalByName('Agave Ledger Tool');
 
-    if (latestTerminal) {
-        latestTerminal.dispose(); // closes the previous terminal if it exists
-    }
-
-    let lldbTerminal = getTerminalByName('Solana LLDB Debugger');
-    if (!lldbTerminal) {
-        vscode.window.showErrorMessage(
-            'Solana LLDB Debugger terminal not found. Use `Run Solana LLDB` from Command Pallette to start it!'
-        );
-        return;
-    }
-
-    debuggerManager.selectBreakpoint(runAgaveLedgerTool);
-}
-
-// This function run the agave-ledger-tool with the provided parameters
-function runAgaveLedgerTool(
-    bpObject,
-    instructionName,
-) {
-    const inputPath = debuggerSession.globalInputPath;
-    const bpfCompiledPath = debuggerSession.globalBpfCompiledPath;
-    
-    // I want if its multi program anchor project, to use path like `input/program_name/instruction_name.json`
-    // If its single program anchor project, then use path like `input/instruction_name.json
-    let instructionInput = `${inputPath}/${instructionName}.json`;
-    if (debuggerSession.selectedAnchorProgramName) {
-        instructionInput = `${inputPath}/${debuggerSession.selectedAnchorProgramName}/${instructionName}.json`;
-    }
-
-    if (!fs.existsSync(instructionInput)) {
-        vscode.window.showErrorMessage(
-            `Instruction input file not found: ${instructionInput}`
-        );
-        return;
-    }
-
-    const agaveLedgerToolCommand = `agave-ledger-tool program run ${bpfCompiledPath} --ledger ledger --mode debugger -i ${instructionInput}`;
-
-    const agaveTerminal = vscode.window.createTerminal('Agave Ledger Tool');
-    agaveTerminal.show();
-    agaveTerminal.sendText(agaveLedgerToolCommand);
-
-    // TODO: Same problem as described in line 246
-    // Connect to the Solana LLDB Debugger terminal
-    // Wait some time before connecting LLDB to ensure agave-ledger-tool is ready
-    setTimeout(() => {
-        connectSolanaLLDBToAgaveLedgerTool();
-
-        // Remove and re-add the specific breakpoint
-        // Note: Implemented because of the `agave-ledger-tool`, needs to set the breakpoint after i have connected to the gdb-remote server
-        vscode.debug.removeBreakpoints([bpObject]);
-        setTimeout(() => {
-            vscode.debug.addBreakpoints([bpObject]);
-            console.log('Breakpoint re-added:', bpObject.location);
-        }, 1000); // small delay to ensure removal is processed
-    }, 8000);
-}
-
-function connectSolanaLLDBToAgaveLedgerTool() {
-    const terminal = getTerminalByName('Solana LLDB Debugger');
-
-    if (debuggerSession.isLldbConnected) {
-        terminal.sendText('process detach'); // Detach from the previous process if already connected
-    }
-
-    if (terminal) {
-        debuggerSession.activeTerminal = terminal;
-        terminal.sendText(`gdb-remote 127.0.0.1:9001`); // Connect to the gdb server that agave-ledger-tool started on
-        debuggerSession.isLldbConnected = true; // Set the connection status to true
-    }
-}
