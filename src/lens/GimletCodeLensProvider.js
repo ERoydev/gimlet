@@ -46,7 +46,6 @@ class GimletCodeLensProvider {
         });
         
     } else if (isTypeScript) {
-        // ...existing TypeScript logic...
         return vscode.commands.executeCommand(
             'vscode.executeDocumentSymbolProvider',
             document.uri

@@ -44,7 +44,6 @@ class GimletDebuggerSession {
         this.debugSessionId = null;
         this.lldbLibrary = DEFAULT_LLDB_LIBRARY_PATH;
         
-        // TODO: Have to be configurable from user 
         this.tcpPort = DEFAULT_TCP_PORT;
         this.isAnchor = false; // Track if the project is an Anchor project
         this.selectedAnchorProgramName = null; // If it's an Anchor project with multiple programs, this will hold the selected program name(if its null then its single program project)
