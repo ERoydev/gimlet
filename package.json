@@ -35,39 +35,11 @@
         },
         "commands": [
             {
-                "command": "extension.runAgaveLedgerTool",
-                "title": "Run Agave Ledger Tool"
-            },
-            {
-                "command": "extension.runSolanaLLDB",
-                "title": "Run Solana LLDB"
-            },
-            {
-                "command": "extension.reRunProcessLaunch",
-                "title": "Continue process"
-            },
-            {
-                "command": "extension.runAgaveLedgerToolForBreakpoint",
-                "title": "Run Agave Ledger Tool for Breakpoint"
-            },
-            {
                 "command": "extension.runGimletSetup",
                 "title": "Run Gimlet Setup"
-            },
-            {
-                "command": "extension.startLitesvmTestDebugging",
-                "title": "Debug LiteSVM Test"
             }
         ],
         "keybindings": [
-            {
-                "command": "extension.runSolanaLLDB",
-                "key": "f6"
-            },
-            {
-                "command": "extension.reRunProcessLaunch",
-                "key": "f7"
-            }
         ]
     },
     "scripts": {
@@ -76,7 +48,7 @@
         "watch": "echo 'No watch needed for JavaScript'",
         "lint": "eslint .",
         "pretest": "npm run lint",
-        "test": "vscode-test"
+        "test": "vscode-test --config .vscode-test.json"
     },
     "devDependencies": {
         "@types/mocha": "^10.0.9",
@@ -85,7 +57,7 @@
         "@vscode/test-cli": "^0.0.10",
         "@vscode/test-electron": "^2.4.1",
         "eslint": "^9.13.0",
-        "ovsx": "^0.10.1",
+        "globals": "^16.4.0",
         "prettier": "^3.6.2"
     },
     "repository": {
@@ -93,5 +65,6 @@
         "url": "https://github.com/limechain/gimlet.git"
     },
     "dependencies": {
+        "toml": "^3.0.0"
     }
 }
