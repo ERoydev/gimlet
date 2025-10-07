@@ -1,6 +1,6 @@
 const { exec } = require('child_process');
 const vscode = require('vscode');
-const debuggerSession = require('./state');
+const debuggerSession = require('../state');
 
 class PortManager {
     constructor() {

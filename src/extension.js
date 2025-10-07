@@ -1,7 +1,6 @@
 const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
-const toml = require('toml');
 
 const gimletConfigManager  = require('./config');
 
@@ -10,11 +9,11 @@ const { findSolanaPackageName } = require('./projectStructure');
 const { SbpfV1BuildStrategy } = require('./build/SbpfV1BuildStrategy');
 const { GimletCodeLensProvider } = require('./lens/GimletCodeLensProvider');
 
-const { lldbSettingsManager, rustAnalyzerSettingsManager, editorSettingsManager } = require('./VsCodeSettingsManager');
+const { lldbSettingsManager, rustAnalyzerSettingsManager, editorSettingsManager } = require('./managers/VsCodeSettingsManager');
 
 const debuggerSession = require('./state');
-const portManager = require('./PortManager')
-
+const portManager = require('./managers/PortManager')
+const { debugConfigManager } = require('./managers/DebugConfigManager');
 
 async function SbpfCompile() {
     const { workspaceFolder, depsPath } = await gimletConfigManager.resolveGimletConfig();
@@ -105,14 +104,6 @@ async function activate(context) {
             return;
         }
 
-        const available = await portManager.isPortAvailable(debuggerSession.tcpPort);
-        if (!available) {
-            vscode.window.showErrorMessage(
-                `Port ${debuggerSession.tcpPort} is already in use by another service. Please choose a different port in your Gimlet config.`
-            );
-            return; // Abort debug setup
-        }
-
         const language = document.languageId;
         try {
             await SbpfCompile();
@@ -143,11 +134,11 @@ async function activate(context) {
                     }
 
                     await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
-                    const launchConfig = getLaunchConfigForSolanaLldb();
+                    const launchConfig = debugConfigManager.getLaunchConfigForSolanaLldb();
                     portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig);
 
                 } else if (language == 'typescript') {
-                    const launchConfig = getTypescriptTestLaunchConfig();
+                    const launchConfig = debugConfigManager.getTypescriptTestLaunchConfig();
                     vscode.debug.startDebugging(
                         vscode.workspace.workspaceFolders[0], // or undefined for current folder
                         launchConfig
@@ -155,7 +146,7 @@ async function activate(context) {
 
                     await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
 
-                    const solanaLLdbLaunchConfig = getLaunchConfigForSolanaLldb();
+                    const solanaLLdbLaunchConfig = debugConfigManager.getLaunchConfigForSolanaLldb();
                     portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], solanaLLdbLaunchConfig);
                 }
             } finally {
@@ -197,72 +188,6 @@ function deactivate() {
     lldbSettingsManager.restore('library');
     rustAnalyzerSettingsManager.restore('debug.engine');
     editorSettingsManager.restore('codeLens');
-}
-
-function getTestRunnerFromAnchorToml(workspaceFolder) {
-    const anchorTomlPath = path.join(workspaceFolder, 'Anchor.toml');
-    if (!fs.existsSync(anchorTomlPath)) {
-        return null;
-    }
-    const tomlContent = fs.readFileSync(anchorTomlPath, 'utf8');
-    const config = toml.parse(tomlContent);
-
-    if (config.scripts && config.scripts.test) {
-        // Example: "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
-        const testScript = config.scripts.test;
-        // Extract runner and args (simple heuristic)
-        const match = testScript.match(/(?:yarn run |npx )?([^\s]+)(.*)/);
-        if (match) {
-            const runner = match[1]; // e.g., ts-mocha
-            const args = match[2].trim().split(/\s+/); // split args
-            return { runner, args };
-        }
-    }
-    return null;
-}
-
-function getTypescriptTestLaunchConfig() {
-    const workspaceFolder = debuggerSession.globalWorkspaceFolder;
-    const runnerInfo = getTestRunnerFromAnchorToml(workspaceFolder);
-
-    let program;
-    if (runnerInfo) {
-        // Try to resolve runner path in node_modules/.bin
-        program = path.join(workspaceFolder, 'node_modules', runnerInfo.runner, 'bin', runnerInfo.runner);
-    } else {
-        // Fallback to ts-mocha
-        program = path.join(workspaceFolder, 'node_modules/ts-mocha/bin/ts-mocha');
-    }
-
-    const launchConfig = {
-        type: "node",
-        request: "launch",
-        name: "SBPF Debug TypeScript Tests",
-        program,
-        args: [
-            "tests/**/*.ts"
-        ], 
-        cwd: "${workspaceFolder}",
-        env: {
-            "VM_DEBUG_PORT": debuggerSession.tcpPort.toString()
-        },
-        internalConsoleOptions: "openOnSessionStart",
-        console: "integratedTerminal"
-    };
-    return launchConfig;
-}
-
-function getLaunchConfigForSolanaLldb() {
-    const launchConfig = {
-        type: "lldb",
-        request: "launch",
-        name: "Sbpf Debug",
-        targetCreateCommands: [
-            `target create ${debuggerSession.globalExecutablePath}`,
-        ],
-        processCreateCommands: [`gdb-remote 127.0.0.1:${debuggerSession.tcpPort}`],
-    };
-    return launchConfig
 }
 
 module.exports = {

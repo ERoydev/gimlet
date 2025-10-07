@@ -2,6 +2,8 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const debuggerSession = require('./state');
+const portManager = require('./managers/PortManager')
+
 class GimletConfigManager {
     constructor() {
         this.workspaceFolder = null;
@@ -35,13 +37,20 @@ class GimletConfigManager {
         };
     }
 
-    ensureGimletConfig() {
+    async ensureGimletConfig() {
         const workspaceFolder = this.resolveWorkspaceFolder();
         if (!workspaceFolder) return null;
 
         const vscodeDir = path.join(workspaceFolder, '.vscode');
         const configPath = path.join(vscodeDir, 'gimlet.json');
 
+        const available = await portManager.isPortAvailable(debuggerSession.tcpPort);
+        if (!available) {
+            vscode.window.showErrorMessage(
+                `Port ${debuggerSession.tcpPort} is already in use by another service. Please choose a different port in your Gimlet config.`
+            );
+        }
+        
         const defaultConfig = {
             tcpPort: debuggerSession.tcpPort,
             lldbLibrary: debuggerSession.lldbLibrary
