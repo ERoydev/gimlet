@@ -3,14 +3,14 @@ const debuggerSession = require('../state');
 const vscode = require('vscode');
 const fs = require('fs');
 const { exec } = require('child_process');
-const buildCommands = require('./buildCommands');
+const BuildCommands = require('./buildCommands');
 
 class SbpfV1BuildStrategy extends BaseBuildStrategy {
     constructor(
         workspaceFolder,
         packageName,
         depsPath,
-        buildCommand = buildCommands.SBF_V1_DEBUG_TOOLS151
+        buildCommand = BuildCommands.SBF_V1_DEBUG()
     ) {
         super(workspaceFolder, packageName, depsPath);
         this.buildCommand = buildCommand;
@@ -33,6 +33,7 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
         this._deleteIfExists(executablePath);
         this._deleteIfExists(bpfCompiledPath);
 
+        console.log(`Running build command: ${this.buildCommand}`);
         return new Promise((resolve) => {
             exec(
                 this.buildCommand,

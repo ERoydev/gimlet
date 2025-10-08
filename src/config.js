@@ -53,7 +53,7 @@ class GimletConfigManager {
         
         const defaultConfig = {
             tcpPort: debuggerSession.tcpPort,
-            lldbLibrary: debuggerSession.lldbLibrary
+            platformToolsVersion: debuggerSession.platformToolsVersion,
         };
 
         if (!fs.existsSync(vscodeDir)) {
@@ -88,8 +88,7 @@ class GimletConfigManager {
                 const config = JSON.parse(configContent);
 
                 // Update your state here
-                if (config.tcpPort) debuggerSession.tcpPort = config.tcpPort;
-                if (config.lldbLibrary) debuggerSession.lldbLibrary = config.lldbLibrary;
+                debuggerSession.setConfig(config);
 
                 vscode.window.showInformationMessage('Gimlet config updated and state refreshed.');
             } catch (err) {
