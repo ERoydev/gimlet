@@ -135,8 +135,9 @@ async function activate(context) {
 
                     await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
                     const launchConfig = debugConfigManager.getLaunchConfigForSolanaLldb();
-                    portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig);
+                    if (!launchConfig) return;
 
+                    portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig);
                 } else if (language == 'typescript') {
                     const launchConfig = debugConfigManager.getTypescriptTestLaunchConfig();
                     vscode.debug.startDebugging(
@@ -147,6 +148,8 @@ async function activate(context) {
                     await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
 
                     const solanaLLdbLaunchConfig = debugConfigManager.getLaunchConfigForSolanaLldb();
+                    if (!solanaLLdbLaunchConfig) return;
+                    
                     portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], solanaLLdbLaunchConfig);
                 }
             } finally {

@@ -25,18 +25,10 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
     }
 
     async build(progress) {
-        let files;
-        try {
-            files = await fs.promises.readdir(this.depsPath);
-        } catch (readDirErr) {
-            vscode.window.showErrorMessage(
-                `Error reading directory: ${readDirErr}`
-            );
-            return;
-        }
+        let files = await this._safeReadDir(this.depsPath);
+        if (!files) return;
 
         const { executablePath, bpfCompiledPath} = this.findDebugExecutable(files);
-        debuggerSession.globalExecutablePath = executablePath;
 
         this._deleteIfExists(executablePath);
         this._deleteIfExists(bpfCompiledPath);
@@ -45,13 +37,28 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
             exec(
                 this.buildCommand,
                 { cwd: this.workspaceFolder },
-                (err, stdout, stderr) => {
+                async (err, stdout, stderr) => {
                     if (err) {
                         vscode.window.showErrorMessage(
                             `Build error: ${stderr}`
                         );
                         resolve();
                         return;
+                    }
+
+                    // After build, set the globalExecutablePath, since its used to load the debug target in launch config
+                    let newFiles = await this._safeReadDir(this.depsPath);
+                    if (!newFiles) {
+                        resolve();
+                        return;
+                    }
+
+                    const { executablePath: newExecutablePath } = this.findDebugExecutable(newFiles);
+
+                    if (newExecutablePath && fs.existsSync(newExecutablePath)) {
+                        debuggerSession.globalExecutablePath = newExecutablePath;
+                    } else {
+                        debuggerSession.globalExecutablePath = undefined;
                     }
 
                     if (progress)
@@ -69,6 +76,15 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
     _deleteIfExists(filePath) {
         if (filePath && fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
+        }
+    }
+
+    async _safeReadDir(dirPath) {
+        try {
+            return await fs.promises.readdir(dirPath);
+        } catch (err) {
+            vscode.window.showErrorMessage(`Error reading directory after V1 build: ${err}`);
+            return null;
         }
     }
 }

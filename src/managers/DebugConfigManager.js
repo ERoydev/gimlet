@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const toml = require('toml');
 const debuggerSession = require('../state');
-
+const vscode = require('vscode');
 class DebugConfigManager {
 
     getTestRunnerFromAnchorToml(workspaceFolder) {
@@ -52,6 +52,11 @@ class DebugConfigManager {
     }
 
     getLaunchConfigForSolanaLldb() {
+        if (!debuggerSession.globalExecutablePath || !fs.existsSync(debuggerSession.globalExecutablePath)) {
+            vscode.window.showErrorMessage('Executable path is not set or does not exist. Please first execute `anchor build` then start debugging.');
+            return null;
+        }
+
         return {
             type: "lldb",
             request: "launch",
