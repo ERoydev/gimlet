@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const os = require('os');
 const path = require('path');
+const fs = require('fs');
 
 // Shared state container for the debugger session
 const DEFAULT_TCP_PORT = process.env.DEFAULT_TCP_PORT || 6612;
@@ -25,7 +26,7 @@ class GimletDebuggerSession {
     
     getLldbLibraryPath() {
         console.log('Platform Tools Version:', this.platformToolsVersion);
-        return path.join(
+        const libPath = path.join(
             os.homedir(),
             '.cache',
             'solana',
@@ -35,6 +36,8 @@ class GimletDebuggerSession {
             'lib',
             `liblldb.${LIB_EXT}`
         );
+        // This will resolve symlinks if present, or just return the absolute path if not
+        return fs.realpathSync(libPath);
     }
 
     setConfig(config) {
