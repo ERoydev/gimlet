@@ -39,8 +39,7 @@
                 "title": "Run Gimlet Setup"
             }
         ],
-        "keybindings": [
-        ]
+        "keybindings": []
     },
     "scripts": {
         "vscode:prepublish": "npm run compile",
@@ -65,6 +64,7 @@
         "url": "https://github.com/limechain/gimlet.git"
     },
     "dependencies": {
+        "dotenv": "^17.2.3",
         "toml": "^3.0.0"
     }
 }
