@@ -13,6 +13,7 @@ class GimletCodeLensProvider {
 
     if (isRust) {
         // Use the LSP symbol provider for Rust
+        const programName = this.getAnchorProgramName(document);
         return vscode.commands.executeCommand(
             'vscode.executeDocumentSymbolProvider',
             document.uri
@@ -31,7 +32,7 @@ class GimletCodeLensProvider {
                                 new vscode.CodeLens(symbol.range, {
                                     title: `$(debug-alt) ${LENS_TITLE}`,
                                     command: "gimlet.debugAtLine",
-                                    arguments: [document, functionName],
+                                    arguments: [document, functionName, programName],
                                 })
                             );
                         }
@@ -46,6 +47,7 @@ class GimletCodeLensProvider {
         });
         
     } else if (isTypeScript) {
+        const programName = this.getAnchorProgramName(document);
         return vscode.commands.executeCommand(
             'vscode.executeDocumentSymbolProvider',
             document.uri
@@ -62,7 +64,7 @@ class GimletCodeLensProvider {
                             new vscode.CodeLens(range, {
                                 title: `$(debug-alt) ${LENS_TITLE}`,
                                 command: "gimlet.debugAtLine",
-                                arguments: [document, functionName],
+                                arguments: [document, functionName, programName],
                             })
                         );
                     }
@@ -131,6 +133,13 @@ class GimletCodeLensProvider {
         }
 
         return false;
+    }
+
+    getAnchorProgramName(document) {
+    // Example: /workspace/programs/program-a/src/lib.rs
+        const filePath = document.uri.fsPath;
+        const match = filePath.match(/programs[\/\\]([^\/\\]+)/);
+        return match ? match[1] : null;
     }
 
     extractTestNameFromSymbolName(symbolName) {

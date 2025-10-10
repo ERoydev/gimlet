@@ -15,7 +15,7 @@ const debuggerSession = require('./state');
 const portManager = require('./managers/PortManager')
 const { debugConfigManager } = require('./managers/DebugConfigManager');
 
-async function SbpfCompile() {
+async function SbpfCompile(programName) {
     const { workspaceFolder, depsPath } = await gimletConfigManager.resolveGimletConfig();
 
     debuggerSession.selectedAnchorProgramName = null; // Reset the selected program name
@@ -27,7 +27,7 @@ async function SbpfCompile() {
     }
 
     const { packageName, isAnchor } =
-        await findSolanaPackageName(workspaceFolder);
+        await findSolanaPackageName(workspaceFolder, programName);
     debuggerSession.isAnchor = isAnchor;
 
     if (!packageName) {
@@ -98,7 +98,7 @@ async function activate(context) {
         }
     });
 
-    const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document, functionName) => {
+    const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document, functionName, programName) => {
         if (debuggerSession.debugSessionId) {
             vscode.window.showErrorMessage('A Gimlet debug session is already running. Please stop the current session before starting a new one.');
             return;
@@ -106,7 +106,7 @@ async function activate(context) {
 
         const language = document.languageId;
         try {
-            await SbpfCompile();
+            await SbpfCompile(programName);
             await new Promise(resolve => setTimeout(resolve, 500));
 
             const originalValue = process.env.VM_DEBUG_PORT;

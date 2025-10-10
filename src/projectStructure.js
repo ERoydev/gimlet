@@ -8,7 +8,7 @@ const debuggerSession = require('./state');
  * @param {string} workspaceFolder
  * @returns {Promise<{packageName: string|null, isAnchor: boolean}>}
  */
-async function findSolanaPackageName(workspaceFolder) {
+async function findSolanaPackageName(workspaceFolder, programName) {
     let packageName = null;
 
     // Try paths for the three common frameworks
@@ -44,101 +44,19 @@ async function findSolanaPackageName(workspaceFolder) {
 
     // Check Anchor structure (programs/[package-name]/Cargo.toml)
     const programsDir = path.join(workspaceFolder, 'programs');
-    const programsList = []; // Contains the names of all programs
-
-    if (fs.existsSync(programsDir)) {
-        try {
-            const programDirs = fs.readdirSync(programsDir).filter((item) => {
-                try {
-                    programsList.push(item);
-                    return fs
-                        .statSync(path.join(programsDir, item))
-                        .isDirectory();
-                } catch (statError) {
-                    console.error(
-                        `Failed to check if ${item} is directory: ${statError.message}`
-                    );
-                    return false;
-                }
-            });
-
-            // Bellow is the logic to handle multiple programs in an anchor project
-            if (programsList.length > 1) {
-                const programOptions = programsList.map((item) => ({
-                    label: item,
-                    description: 'Select a program to debug',
-                }));
-
-                const selected = await vscode.window.showQuickPick(
-                    programOptions,
-                    {
-                        placeHolder: 'Select one of your programs to debug',
-                    }
-                );
-
-                if (!selected) {
-                    vscode.window.showErrorMessage(
-                        'Gimlet: Please select a program to debug.'
-                    );
-                    return { packageName: null, isAnchor: false };
-                }
-
-                const anchorCargoPath = path.join(
-                    programsDir,
-                    selected.label,
-                    'Cargo.toml'
-                );
-                const foundPackageName = checkIfAnchorCargoExists(
-                    anchorCargoPath,
-                    selected.label
-                );
-                debuggerSession.selectedAnchorProgramName = selected.label;
-                if (foundPackageName) {
-                    return { packageName: foundPackageName, isAnchor: true };
-                } else {
-                    vscode.window.showErrorMessage(
-                        `Cargo.toml not found in selected program: ${selected.label}`
-                    );
-                    return { packageName: null, isAnchor: false };
-                }
-            } else {
-                for (const dir of programDirs) {
-                    const anchorCargoPath = path.join(
-                        programsDir,
-                        dir,
-                        'Cargo.toml'
-                    );
-                    const foundPackageName = checkIfAnchorCargoExists(
-                        anchorCargoPath,
-                        dir
-                    );
-                    if (foundPackageName) {
-                        return {
-                            packageName: foundPackageName,
-                            isAnchor: true,
-                        };
-                    } else {
-                        vscode.window.showErrorMessage(
-                            `Cargo.toml not found in program: ${dir}`
-                        );
-                        return { packageName: null, isAnchor: false };
-                    }
-                }
-            }
-        } catch (error) {
-            console.error(
-                `Failed to scan programs directory: ${error.message}`
+    if (fs.existsSync(programsDir) && programName) {
+        const anchorCargoPath = path.join(programsDir, programName, 'Cargo.toml');
+        const foundPackageName = checkIfAnchorCargoExists(anchorCargoPath, programName);
+        debuggerSession.selectedAnchorProgramName = programName;
+        if (foundPackageName) {
+            return { packageName: foundPackageName, isAnchor: true };
+        } else {
+            vscode.window.showErrorMessage(
+                `Cargo.toml not found in program: ${programName}`
             );
-            vscode.window.showWarningMessage(
-                `Error scanning program directories: ${error.message}`
-            );
+            return { packageName: null, isAnchor: false };
         }
     }
-
-    vscode.window.showErrorMessage(
-        'Could not find package name in any Cargo.toml'
-    );
-    return { packageName: null, isAnchor: false };
 }
 
 function checkIfAnchorCargoExists(anchorCargoPath, dir) {
