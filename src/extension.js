@@ -15,10 +15,8 @@ const debuggerSession = require('./state');
 const portManager = require('./managers/PortManager')
 const { debugConfigManager } = require('./managers/DebugConfigManager');
 
-async function SbpfCompile(programName) {
-    const { workspaceFolder, depsPath } = await gimletConfigManager.resolveGimletConfig();
-
-    debuggerSession.selectedAnchorProgramName = null; // Reset the selected program name
+async function SbpfCompile() {
+    const { depsPath } = await gimletConfigManager.resolveGimletConfig();
 
     if (!fs.existsSync(depsPath)) {
         vscode.window.showInformationMessage(
@@ -26,18 +24,18 @@ async function SbpfCompile(programName) {
         );
     }
 
-    const { packageName, isAnchor } =
-        await findSolanaPackageName(workspaceFolder, programName);
-    debuggerSession.isAnchor = isAnchor;
+    const programNamesList = await findSolanaPackageName(debuggerSession.globalWorkspaceFolder);
+    debuggerSession.executables = programNamesList;
 
-    if (!packageName) {
+    if (programNamesList.length == 0 || !programNamesList) {
         vscode.window.showErrorMessage(
             'Could not find package name in any Cargo.toml'
         );
         return;
     }
 
-    debuggerSession.buildStrategy = new SbpfV1BuildStrategy(debuggerSession.globalWorkspaceFolder, packageName, depsPath);
+    // TODO: Implement a dispatcher for different build strategies
+    debuggerSession.buildStrategy = new SbpfV1BuildStrategy(debuggerSession.globalWorkspaceFolder, depsPath, programNamesList);
 
     return vscode.window.withProgress(
         {
@@ -91,6 +89,7 @@ async function activate(context) {
         new GimletCodeLensProvider()
     );
 
+    // Listener to clean up after debug session ends
     vscode.debug.onDidTerminateDebugSession(session => {
         if (session.id === debuggerSession.debugSessionId) {
             debuggerSession.debugSessionId = null;
@@ -98,22 +97,54 @@ async function activate(context) {
         }
     });
 
-    const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document, functionName, programName) => {
+    // Only captures output sent to the Debug Console (via the debug adapter).
+    // Used to extract the program hash of the program that litesvm starts a VM for.
+    vscode.debug.registerDebugAdapterTrackerFactory('*', {
+        // Its important to set in rust-analyzer.debug.engineSettings the lldb.terminal to external
+        createDebugAdapterTracker(session) {
+            if (session.type === 'lldb' || session.type === 'rust-analyzer') {
+            return {
+                // Have in min here i can implement `onWillStartSession` and `onWillStopSession` to manage states if needed
+                onDidSendMessage(message) {
+                if (message.type === 'event' && message.event === 'output') {
+                    const body = message.body;
+                    const output = body.output || '';
+
+                    // Regex to match a SHA256 hash (64 hex characters)
+                    const shaMatch = output.match(/[a-f0-9]{64}/i);
+                    if (shaMatch) {
+                        const programHash = shaMatch[0];
+                        console.log(`SHA256: ${programHash}`);
+                        debuggerSession.currentProgramHash = programHash;
+                    }
+                }
+                },
+            };
+            }
+            return undefined;
+        }
+    });
+        
+    const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document, functionName) => {
         if (debuggerSession.debugSessionId) {
             vscode.window.showErrorMessage('A Gimlet debug session is already running. Please stop the current session before starting a new one.');
             return;
         }
-
         const language = document.languageId;
+
+        // Check if user started a `test case` specified in the config as a CPI
+        const isCpi = Array.isArray(debuggerSession.cpi) &&
+            debuggerSession.cpi.some(item => item.test_name === functionName);
+
         try {
-            await SbpfCompile(programName);
+            await SbpfCompile();
             await new Promise(resolve => setTimeout(resolve, 500));
 
             const originalValue = process.env.VM_DEBUG_PORT;
             // ENV for SBPF VM, this enables litesvm to create a debug server on this port for remote debugging
             process.env.VM_DEBUG_PORT = debuggerSession.tcpPort.toString();
 
-            // remove the lldb.library setting to allow rust-analyzer to work properly
+            // remove the lldb.library setting to allow rust-analyzer/typescript test debugger to work properly
             await lldbSettingsManager.disable('library');
 
             try {
@@ -125,7 +156,6 @@ async function activate(context) {
                     });
                     // rust-analyzer command to debug reusing the client and runnables it creates initially
                     const result = await vscode.commands.executeCommand("rust-analyzer.debug");
-
                     debugListener.dispose();
                     
                     if (!result) {
@@ -133,12 +163,17 @@ async function activate(context) {
                         return;
                     }
 
-                    await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
-                    const launchConfig = debugConfigManager.getLaunchConfigForSolanaLldb();
-                    if (!launchConfig) return;
+                    // TODO: Fix it later
+                    await new Promise(resolve => setTimeout(resolve, 5000));
 
-                    portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig);
+                    const programName = debuggerSession.programHashToProgramName[debuggerSession.currentProgramHash];
+
+                    await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
+                    // // When we have multiple programs, we need to start multiple debug sessions
+                    await startDebugSessionsForPrograms(isCpi, functionName, programName);
                 } else if (language == 'typescript') {
+                    // TODO: Test for typescript
+                    // TODO: Implement everything for typescript
                     const launchConfig = debugConfigManager.getTypescriptTestLaunchConfig();
                     vscode.debug.startDebugging(
                         vscode.workspace.workspaceFolders[0], // or undefined for current folder
@@ -146,11 +181,7 @@ async function activate(context) {
                     );
 
                     await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
-
-                    const solanaLLdbLaunchConfig = debugConfigManager.getLaunchConfigForSolanaLldb();
-                    if (!solanaLLdbLaunchConfig) return;
-                    
-                    portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], solanaLLdbLaunchConfig);
+                    await startDebugSessionsForPrograms(isCpi, functionName, programName);
                 }
             } finally {
                 // Cleanup strategy for the ENV after command execution
@@ -188,9 +219,39 @@ function deactivate() {
         debuggerSession.functionAddressMapPath = null; // Clear the path after deletion
     }
 
-    lldbSettingsManager.restore('library');
+    lldbSettingsManager.disable('library');
     rustAnalyzerSettingsManager.restore('debug.engine');
-    editorSettingsManager.restore('codeLens');
+    editorSettingsManager.restore('codeLens'); 
+}
+
+
+async function startDebugSessionsForPrograms(isCpi, functionName, programName) {
+    if (isCpi) {
+        const cpiProgramObject = debuggerSession.cpi.find(item => item.test_name === functionName);
+        if (!cpiProgramObject) {
+            vscode.window.showErrorMessage('CPI configuration not found for the selected test.');
+            return;
+        }
+        
+        const programCpiFlow = cpiProgramObject.flow;
+
+        for (const currentProgramName of programCpiFlow) {
+            const currentTcpPort = debuggerSession.tcpPort;
+            debuggerSession.incrementTcpPort(); // Increment TCP port for the next nested VM debug session in CPI flow
+
+            const launchConfig = debugConfigManager.getLaunchConfigForSolanaLldb(currentTcpPort, currentProgramName);
+            if (!launchConfig) continue;
+
+            portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig, currentTcpPort);
+        }
+    } else {
+        const currentTcpPort = debuggerSession.tcpPort;
+        // No increment here, as we only start one session
+        const launchConfig = debugConfigManager.getLaunchConfigForSolanaLldb(currentTcpPort, programName);
+        if (!launchConfig) return;
+
+        portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig, currentTcpPort);
+    }
 }
 
 module.exports = {

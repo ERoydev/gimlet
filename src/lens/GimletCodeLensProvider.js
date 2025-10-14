@@ -12,8 +12,6 @@ class GimletCodeLensProvider {
     const isTypeScript = document.languageId === 'typescript';
 
     if (isRust) {
-        // Use the LSP symbol provider for Rust
-        const programName = this.getAnchorProgramName(document);
         return vscode.commands.executeCommand(
             'vscode.executeDocumentSymbolProvider',
             document.uri
@@ -32,7 +30,7 @@ class GimletCodeLensProvider {
                                 new vscode.CodeLens(symbol.range, {
                                     title: `$(debug-alt) ${LENS_TITLE}`,
                                     command: "gimlet.debugAtLine",
-                                    arguments: [document, functionName, programName],
+                                    arguments: [document, functionName],
                                 })
                             );
                         }
@@ -47,7 +45,6 @@ class GimletCodeLensProvider {
         });
         
     } else if (isTypeScript) {
-        const programName = this.getAnchorProgramName(document);
         return vscode.commands.executeCommand(
             'vscode.executeDocumentSymbolProvider',
             document.uri
@@ -64,7 +61,7 @@ class GimletCodeLensProvider {
                             new vscode.CodeLens(range, {
                                 title: `$(debug-alt) ${LENS_TITLE}`,
                                 command: "gimlet.debugAtLine",
-                                arguments: [document, functionName, programName],
+                                arguments: [document, functionName],
                             })
                         );
                     }

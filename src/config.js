@@ -31,7 +31,6 @@ class GimletConfigManager {
         debuggerSession.globalInputPath = this.inputPath;
 
         return {
-            workspaceFolder: this.workspaceFolder,
             depsPath: this.depsPath,
             inputPath: this.inputPath
         };
@@ -54,6 +53,12 @@ class GimletConfigManager {
         const defaultConfig = {
             tcpPort: debuggerSession.tcpPort,
             platformToolsVersion: debuggerSession.platformToolsVersion,
+            cpi: [
+                {
+                    test_name: "example_cpi",
+                    flow: ["program-b", "program-c", "program-d"]
+                }
+            ]
         };
 
         if (!fs.existsSync(vscodeDir)) {

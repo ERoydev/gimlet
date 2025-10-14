@@ -3,59 +3,27 @@ const path = require('path');
 const vscode = require('vscode');
 const debuggerSession = require('./state');
 
-/**
- * Attempts to find the package name and anchor status for a Solana project.
- * @param {string} workspaceFolder
- * @returns {Promise<{packageName: string|null, isAnchor: boolean}>}
- */
-async function findSolanaPackageName(workspaceFolder, programName) {
-    let packageName = null;
 
-    // Try paths for the three common frameworks
-    const potentialPaths = [
-        path.join(workspaceFolder, 'program', 'src', 'Cargo.toml'), // Steel & Native
-        path.join(workspaceFolder, 'program', 'Cargo.toml'), // Alternative structure
-        path.join(workspaceFolder, 'Cargo.toml'), // Root level
-    ];
-
-    // Find first available Cargo.toml from common locations
-    for (const potentialPath of potentialPaths) {
-        if (fs.existsSync(potentialPath)) {
-            try {
-                const cargoToml = fs.readFileSync(potentialPath, 'utf8');
-                const packageNameMatch = cargoToml.match(
-                    /^\s*name\s*=\s*"([^"]+)"/m
-                );
-                if (packageNameMatch) {
-                    packageName = packageNameMatch[1];
-                    return { packageName, isAnchor: false };
-                }
-            } catch (error) {
-                console.error(
-                    `Failed to read or parse ${potentialPath}: ${error.message}`
-                );
-                vscode.window.showWarningMessage(
-                    `Error processing ${path.basename(potentialPath)}: ${error.message}`
-                );
-                // Continue to next potential path
-            }
-        }
-    }
+// Attempts to find the package name and anchor status for a Solana project.
+async function findSolanaPackageName(workspaceFolder) {
 
     // Check Anchor structure (programs/[package-name]/Cargo.toml)
     const programsDir = path.join(workspaceFolder, 'programs');
-    if (fs.existsSync(programsDir) && programName) {
-        const anchorCargoPath = path.join(programsDir, programName, 'Cargo.toml');
-        const foundPackageName = checkIfAnchorCargoExists(anchorCargoPath, programName);
-        debuggerSession.selectedAnchorProgramName = programName;
-        if (foundPackageName) {
-            return { packageName: foundPackageName, isAnchor: true };
-        } else {
-            vscode.window.showErrorMessage(
-                `Cargo.toml not found in program: ${programName}`
-            );
-            return { packageName: null, isAnchor: false };
+    const anchorProgramNames = getAnchorProgramNames(); // Array of program names
+    debuggerSession.anchorProjectProgramCount = anchorProgramNames.length; // Set the count of anchor programs
+
+    if (fs.existsSync(programsDir) && anchorProgramNames.length > 0) {
+        for (const programName of anchorProgramNames) {
+            const anchorCargoPath = path.join(programsDir, programName, 'Cargo.toml');
+            const foundPackageName = checkIfAnchorCargoExists(anchorCargoPath, programName);
+            if (!foundPackageName) {
+                vscode.window.showErrorMessage(
+                    `Cargo.toml not found in program: ${programName}`
+                );
+                return [];
+            }
         }
+        return anchorProgramNames;
     }
 }
 
@@ -79,6 +47,20 @@ function checkIfAnchorCargoExists(anchorCargoPath, dir) {
         }
     }
     return null; // Return null if not found
+
 }
+
+// Returns an array of program names (directory names) in the `programs` directory
+function getAnchorProgramNames() {
+    const programsDir = path.join(debuggerSession.globalWorkspaceFolder, 'programs');
+    if (!fs.existsSync(programsDir)) return [];
+
+    return fs.readdirSync(programsDir)
+        .filter((entry) => {
+            const entryPath = path.join(programsDir, entry);
+            return fs.statSync(entryPath).isDirectory();
+        });
+}
+
 
 module.exports = { findSolanaPackageName };

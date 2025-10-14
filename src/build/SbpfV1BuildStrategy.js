@@ -8,11 +8,11 @@ const BuildCommands = require('./buildCommands');
 class SbpfV1BuildStrategy extends BaseBuildStrategy {
     constructor(
         workspaceFolder,
-        packageName,
         depsPath,
+        availablePrograms, 
         buildCommand = BuildCommands.SBF_V1_DEBUG()
     ) {
-        super(workspaceFolder, packageName, depsPath);
+        super(workspaceFolder, depsPath, availablePrograms);
         this.buildCommand = buildCommand;
     }
 
@@ -28,10 +28,22 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
         let files = await this._safeReadDir(this.depsPath);
         if (!files) return;
 
-        const { executablePath, bpfCompiledPath} = this.findDebugExecutable(files);
+        const executablesPaths = this.findExecutables(files);
+        debuggerSession.executablesPaths = executablesPaths;
 
-        this._deleteIfExists(executablePath);
-        this._deleteIfExists(bpfCompiledPath);
+        for (let packageName of this.availablePrograms) {
+            if (!executablesPaths[packageName]) {
+                vscode.window.showErrorMessage(
+                    `Could not find compiled executable for program: ${packageName} in target/deploy`
+                );
+                return;
+            }
+
+            const { debugBinary, bpfCompiledPath } = executablesPaths[packageName];
+
+            this._deleteIfExists(debugBinary);
+            this._deleteIfExists(bpfCompiledPath);
+        }
 
         console.log(`Running build command: ${this.buildCommand}`);
         return new Promise((resolve) => {
@@ -48,19 +60,15 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
                     }
 
                     // After build, set the globalExecutablePath, since its used to load the debug target in launch config
+                    // Holds all the compiled programs in target/deploy
                     let newFiles = await this._safeReadDir(this.depsPath);
                     if (!newFiles) {
                         resolve();
                         return;
                     }
 
-                    const { executablePath: newExecutablePath } = this.findDebugExecutable(newFiles);
-
-                    if (newExecutablePath && fs.existsSync(newExecutablePath)) {
-                        debuggerSession.globalExecutablePath = newExecutablePath;
-                    } else {
-                        debuggerSession.globalExecutablePath = undefined;
-                    }
+                    // TODO: Can introduce some issues because i define these executable paths in the state long before this line
+                    const executables = this.findExecutables(newFiles);
 
                     if (progress)
                         progress.report({

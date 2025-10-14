@@ -26,6 +26,7 @@ class DebugConfigManager {
     }
 
     getTypescriptTestLaunchConfig() {
+        // TODO: Make sure this works for CPI tests as well
         const workspaceFolder = debuggerSession.globalWorkspaceFolder;
         const runnerInfo = this.getTestRunnerFromAnchorToml(workspaceFolder);
 
@@ -51,8 +52,11 @@ class DebugConfigManager {
         };
     }
 
-    getLaunchConfigForSolanaLldb() {
-        if (!debuggerSession.globalExecutablePath || !fs.existsSync(debuggerSession.globalExecutablePath)) {
+    getLaunchConfigForSolanaLldb(currentTcpPort, programName) {
+        const executablesOfProgram = debuggerSession.executablesPaths[programName];
+        const debugExecutablePath = executablesOfProgram ? executablesOfProgram.debugBinary : null;
+
+        if (!debugExecutablePath || !fs.existsSync(debugExecutablePath)) {
             vscode.window.showErrorMessage('Executable path is not set or does not exist. Please first execute `anchor build` then start debugging.');
             return null;
         }
@@ -60,11 +64,11 @@ class DebugConfigManager {
         return {
             type: "lldb",
             request: "launch",
-            name: "Sbpf Debug",
+            name: `Sbpf Debug Port: ${currentTcpPort}`,
             targetCreateCommands: [
-                `target create ${debuggerSession.globalExecutablePath}`,
+                `target create ${debugExecutablePath}`,
             ],
-            processCreateCommands: [`gdb-remote 127.0.0.1:${debuggerSession.tcpPort}`],
+            processCreateCommands: [`gdb-remote 127.0.0.1:${currentTcpPort}`],
         };
     }
 }

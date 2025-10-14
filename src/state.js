@@ -13,14 +13,17 @@ class GimletDebuggerSession {
     constructor() {        
         this.globalWorkspaceFolder = null;
         this.buildStrategy = null;
-        this.globalExecutablePath = null;
+        // this.globalExecutablePath = null;
+        this.executablesPaths = {}; // Map of programName to executablePath
+        this.programHashToProgramName = []; 
         this.debugSessionId = null;
         this.platformToolsVersion = DEFAULT_PLATFORM_TOOLS_VERSION;
         this.lldbLibrary = this.getLldbLibraryPath();
+        this.anchorProjectProgramCount = 0;
+        this.currentProgramHash = null;
         
         this.tcpPort = DEFAULT_TCP_PORT;
-        this.isAnchor = false; // Track if the project is an Anchor project
-        this.selectedAnchorProgramName = null; // If it's an Anchor project with multiple programs, this will hold the selected program name(if its null then its single program project)
+        this.cpi = [];
     }
 
     
@@ -36,6 +39,7 @@ class GimletDebuggerSession {
             'lib',
             `liblldb.${LIB_EXT}`
         );
+        console.log('Computed LLDB Library Path:', libPath);
         // This will resolve symlinks if present, or just return the absolute path if not
         return fs.realpathSync(libPath);
     }
@@ -51,7 +55,20 @@ class GimletDebuggerSession {
             this.platformToolsVersion = config.platformToolsVersion;
             this.lldbLibrary = this.getLldbLibraryPath();
         }
+
+        if (config.cpi !== undefined) {
+            this.cpi = config.cpi;
+        }
     }
+
+    incrementTcpPort() {
+        this.tcpPort += 1;
+    }
+
+    setProgramNameForHash(programHash, programName) {
+        this.programHashToProgramName[programHash] = programName;
+    }
+
 
     reset() {
         this.globalWorkspaceFolder = null;
@@ -61,8 +78,8 @@ class GimletDebuggerSession {
         this.tcpPort = DEFAULT_TCP_PORT;
         this.platformToolsVersion = DEFAULT_PLATFORM_TOOLS_VERSION;
         this.lldbLibrary = this.getLldbLibraryPath();
-        this.isAnchor = false;
-        this.selectedAnchorProgramName = null;
+        this.anchorProjectProgramCount = 0;
+        this.cpi = [];
     }
 }
 

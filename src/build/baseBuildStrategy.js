@@ -1,9 +1,12 @@
+const crypto = require('crypto');
+const fs = require('fs');
+const debuggerSession = require('../state');
 
 class BaseBuildStrategy {
-    constructor(workspaceFolder, packageName, depsPath) {
+    constructor(workspaceFolder, depsPath, availablePrograms) {
         this.workspaceFolder = workspaceFolder;
-        this.packageName = packageName;
         this.depsPath = depsPath;
+        this.availablePrograms = availablePrograms; // List of available programs after build
     }
 
     async build() {
@@ -11,24 +14,38 @@ class BaseBuildStrategy {
     }
 
     // Base method that all build strategies are going to use in order to find the executables inside target/deploy 
-    findDebugExecutable(files) {
-        const executableFile = this.findExecutableFile(
-            files,
-            this.packageName,
-            '.debug'
-        );
-        const executablePath = `${this.depsPath}/${executableFile}`;
-        console.log(`Executable path: ${executablePath}`);
-        console.log(`Executable file: ${executableFile}`);
+    findExecutables(files) {
+        let executables = {};
 
-        const bpfCompiledFile = this.findExecutableFile(
-            files,
-            this.packageName,
-            '.so'
-        );
-        const bpfCompiledPath = `${this.depsPath}/${bpfCompiledFile}`;
+        for (let packageName of this.availablePrograms) {
+            const debugBinaryFile = this.findExecutableFile(
+                files,
+                packageName,
+                '.debug'
+            );
 
-        return { executablePath, bpfCompiledPath };
+            const soBinaryFile = this.findExecutableFile(
+                files,
+                packageName,
+                '.so'
+            );
+
+            const bpfDebugBinaryPath = `${this.depsPath}/${debugBinaryFile}`;
+            const bpfSoBinaryPath = `${this.depsPath}/${soBinaryFile}`;
+            
+            const bpfProgramHash = this._sha256FileSync(bpfSoBinaryPath);
+
+            debuggerSession.setProgramNameForHash(bpfProgramHash, packageName);
+
+            // Map package name to its corresponding debug and .so paths
+            executables[packageName] = {
+                debugBinary: bpfDebugBinaryPath,
+                bpfCompiledPath: bpfSoBinaryPath
+            };
+        }
+
+
+        return executables;
     }
 
     // util for finding the executable file in the target/deploy directory
@@ -40,6 +57,13 @@ class BaseBuildStrategy {
                 file.endsWith(extension)
         );
     }
+
+    // Util
+    _sha256FileSync(filePath) {
+        const data = fs.readFileSync(filePath);
+        return crypto.createHash('sha256').update(data).digest('hex');
+    }
+
 }
 
 module.exports = BaseBuildStrategy;
