@@ -17,6 +17,7 @@ class GimletConfigManager {
             vscode.window.showErrorMessage('No workspace folder found.');
             return null;
         }
+
         this.workspaceFolder = folders[0].uri.fsPath;
         debuggerSession.globalWorkspaceFolder = this.workspaceFolder;
         return this.workspaceFolder;
@@ -53,12 +54,6 @@ class GimletConfigManager {
         const defaultConfig = {
             tcpPort: debuggerSession.tcpPort,
             platformToolsVersion: debuggerSession.platformToolsVersion,
-            cpi: [
-                {
-                    test_name: "example_cpi",
-                    flow: ["program-b", "program-c", "program-d"]
-                }
-            ]
         };
 
         if (!fs.existsSync(vscodeDir)) {

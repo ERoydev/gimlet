@@ -3,6 +3,7 @@ const fs = require('fs');
 const toml = require('toml');
 const debuggerSession = require('../state');
 const vscode = require('vscode');
+
 class DebugConfigManager {
 
     getTestRunnerFromAnchorToml(workspaceFolder) {
@@ -70,6 +71,25 @@ class DebugConfigManager {
             ],
             processCreateCommands: [`gdb-remote 127.0.0.1:${currentTcpPort}`],
         };
+    }
+
+    // Wait until programName is available or timeout after 10 seconds
+    async waitForProgramName(timeoutMs = 10000, intervalMs = 100) {
+        try {
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs) {
+                const programName = debuggerSession.programHashToProgramName[debuggerSession.currentProgramHash];
+                if (programName) return programName;
+                await new Promise(resolve => setTimeout(resolve, intervalMs));
+            }
+            vscode.window.showErrorMessage('Timed out waiting for programName to be set.');
+            return null;
+        } catch (e) {
+            vscode.window.showErrorMessage(e.message);
+            return null;
+        } finally {
+            debuggerSession.currentProgramHash = null; // Reset after waiting
+        }
     }
 }
 

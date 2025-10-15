@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 const gimletConfigManager  = require('./config');
+const debuggerSession = require('./state');
 
 const { findSolanaPackageName } = require('./projectStructure');
 
@@ -10,10 +11,9 @@ const { SbpfV1BuildStrategy } = require('./build/SbpfV1BuildStrategy');
 const { GimletCodeLensProvider } = require('./lens/GimletCodeLensProvider');
 
 const { lldbSettingsManager, rustAnalyzerSettingsManager, editorSettingsManager } = require('./managers/VsCodeSettingsManager');
-
-const debuggerSession = require('./state');
 const portManager = require('./managers/PortManager')
 const { debugConfigManager } = require('./managers/DebugConfigManager');
+
 
 async function SbpfCompile() {
     const { depsPath } = await gimletConfigManager.resolveGimletConfig();
@@ -61,7 +61,6 @@ async function SbpfCompile() {
  * @param {vscode.ExtensionContext} context
  */
 async function activate(context) {
-
     gimletConfigManager.ensureGimletConfig();
     gimletConfigManager.watchGimletConfig(context);
 
@@ -91,8 +90,11 @@ async function activate(context) {
 
     // Listener to clean up after debug session ends
     vscode.debug.onDidTerminateDebugSession(session => {
+        console.log('Debug session terminated:', session.name);
         if (session.id === debuggerSession.debugSessionId) {
-            debuggerSession.debugSessionId = null;
+            debuggerSession.reset();
+            // debuggerSession.debugSessionId = null;
+            
             lldbSettingsManager.restore('library');
         }
     });
@@ -111,10 +113,10 @@ async function activate(context) {
                     const output = body.output || '';
 
                     // Regex to match a SHA256 hash (64 hex characters)
+                    // TODO: Fix the regex to be more specific
                     const shaMatch = output.match(/[a-f0-9]{64}/i);
                     if (shaMatch) {
                         const programHash = shaMatch[0];
-                        console.log(`SHA256: ${programHash}`);
                         debuggerSession.currentProgramHash = programHash;
                     }
                 }
@@ -125,16 +127,12 @@ async function activate(context) {
         }
     });
         
-    const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document, functionName) => {
+    const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document) => {
         if (debuggerSession.debugSessionId) {
             vscode.window.showErrorMessage('A Gimlet debug session is already running. Please stop the current session before starting a new one.');
             return;
         }
         const language = document.languageId;
-
-        // Check if user started a `test case` specified in the config as a CPI
-        const isCpi = Array.isArray(debuggerSession.cpi) &&
-            debuggerSession.cpi.some(item => item.test_name === functionName);
 
         try {
             await SbpfCompile();
@@ -163,14 +161,9 @@ async function activate(context) {
                         return;
                     }
 
-                    // TODO: Fix it later
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-
-                    const programName = debuggerSession.programHashToProgramName[debuggerSession.currentProgramHash];
-
                     await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
                     // // When we have multiple programs, we need to start multiple debug sessions
-                    await startDebugSessionsForPrograms(isCpi, functionName, programName);
+                    await startPortDebugListeners();
                 } else if (language == 'typescript') {
                     // TODO: Test for typescript
                     // TODO: Implement everything for typescript
@@ -181,7 +174,7 @@ async function activate(context) {
                     );
 
                     await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
-                    await startDebugSessionsForPrograms(isCpi, functionName, programName);
+                    await startPortDebugListeners();
                 }
             } finally {
                 // Cleanup strategy for the ENV after command execution
@@ -225,33 +218,16 @@ function deactivate() {
 }
 
 
-async function startDebugSessionsForPrograms(isCpi, functionName, programName) {
-    if (isCpi) {
-        const cpiProgramObject = debuggerSession.cpi.find(item => item.test_name === functionName);
-        if (!cpiProgramObject) {
-            vscode.window.showErrorMessage('CPI configuration not found for the selected test.');
-            return;
-        }
-        
-        const programCpiFlow = cpiProgramObject.flow;
-
-        for (const currentProgramName of programCpiFlow) {
-            const currentTcpPort = debuggerSession.tcpPort;
-            debuggerSession.incrementTcpPort(); // Increment TCP port for the next nested VM debug session in CPI flow
-
-            const launchConfig = debugConfigManager.getLaunchConfigForSolanaLldb(currentTcpPort, currentProgramName);
-            if (!launchConfig) continue;
-
-            portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig, currentTcpPort);
-        }
-    } else {
-        const currentTcpPort = debuggerSession.tcpPort;
-        // No increment here, as we only start one session
-        const launchConfig = debugConfigManager.getLaunchConfigForSolanaLldb(currentTcpPort, programName);
-        if (!launchConfig) return;
-
-        portManager.waitAndStartDebug(vscode.workspace.workspaceFolders[0], launchConfig, currentTcpPort);
-    }
+async function startPortDebugListeners() {
+    const initialTcpPort = debuggerSession.tcpPort;
+    const ports = [
+        initialTcpPort,
+        initialTcpPort + 1,
+        initialTcpPort + 2,
+        initialTcpPort + 3,
+    ];
+    debuggerSession.tcpPort += 4; // Increment for next potential debug session
+    portManager.listenAndStartDebugForPorts(ports);
 }
 
 module.exports = {

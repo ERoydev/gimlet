@@ -1,5 +1,7 @@
 const { exec } = require('child_process');
 const vscode = require('vscode');
+const { debugConfigManager } = require('./DebugConfigManager');
+const debuggerSession = require('../state');
 
 class PortManager {
     constructor() {
@@ -45,7 +47,6 @@ class PortManager {
 
         while (this.pollingActiveMap[sessionName]) {
             const isOpen = await this.isPortOpen(currentTcpPort);
-            console.log(`Session name: ${sessionName}, Port ${currentTcpPort} open: ${isOpen}`);
 
             const alreadyRunning = Array.isArray(vscode.debug.sessions)
                 ? vscode.debug.sessions.some(session => session.name === sessionName)
@@ -56,6 +57,49 @@ class PortManager {
             }
 
             await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+    }
+
+    /**
+     * Listen for up to 4 ports (for CPI depth 4).
+     * When a port opens, use the program hash to create the launch config and start debugging.
+     * @param {number[]} ports - array of ports to listen on
+    */
+    async listenAndStartDebugForPorts(ports) {
+        const pollingKey = ports.join(',');
+        if (this.pollingActiveMap[pollingKey]) return;
+        this.pollingActiveMap[pollingKey] = true;
+
+        // Track which ports have already started a debug session
+        const startedPorts = new Set();
+        console.log('Polling for ports:', this.pollingActiveMap);
+
+        while (this.pollingActiveMap[pollingKey]) {
+            for (const port of ports) {
+                if (startedPorts.has(port)) continue;
+
+                const isOpen = await this.isPortOpen(port);
+
+                if (isOpen) {
+                    // When port opens get the program name from the current hash
+                    const programName = await debugConfigManager.waitForProgramName();
+                    if (!programName) continue;
+
+                    // Dynamically create launch config using program hash or other info
+                    const launchConfig = debugConfigManager.getLaunchConfigForSolanaLldb(port, programName);
+                    if (!launchConfig) continue;
+
+                    const alreadyRunning = Array.isArray(vscode.debug.sessions)
+                        ? vscode.debug.sessions.some(session => session.name === launchConfig.name)
+                        : false;
+
+                    if (!alreadyRunning) {
+                        await vscode.debug.startDebugging(debuggerSession.globalWorkspaceFolder, launchConfig);
+                        startedPorts.add(port);
+                    }
+                }
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
 

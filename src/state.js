@@ -13,7 +13,6 @@ class GimletDebuggerSession {
     constructor() {        
         this.globalWorkspaceFolder = null;
         this.buildStrategy = null;
-        // this.globalExecutablePath = null;
         this.executablesPaths = {}; // Map of programName to executablePath
         this.programHashToProgramName = []; 
         this.debugSessionId = null;
@@ -23,12 +22,9 @@ class GimletDebuggerSession {
         this.currentProgramHash = null;
         
         this.tcpPort = DEFAULT_TCP_PORT;
-        this.cpi = [];
     }
-
     
     getLldbLibraryPath() {
-        console.log('Platform Tools Version:', this.platformToolsVersion);
         const libPath = path.join(
             os.homedir(),
             '.cache',
@@ -39,7 +35,6 @@ class GimletDebuggerSession {
             'lib',
             `liblldb.${LIB_EXT}`
         );
-        console.log('Computed LLDB Library Path:', libPath);
         // This will resolve symlinks if present, or just return the absolute path if not
         return fs.realpathSync(libPath);
     }
@@ -55,10 +50,6 @@ class GimletDebuggerSession {
             this.platformToolsVersion = config.platformToolsVersion;
             this.lldbLibrary = this.getLldbLibraryPath();
         }
-
-        if (config.cpi !== undefined) {
-            this.cpi = config.cpi;
-        }
     }
 
     incrementTcpPort() {
@@ -69,17 +60,17 @@ class GimletDebuggerSession {
         this.programHashToProgramName[programHash] = programName;
     }
 
-
     reset() {
         this.globalWorkspaceFolder = null;
         this.buildStrategy = null;
-        this.globalExecutablePath = null;
+        this.executablesPaths = {};
+        this.programHashToProgramName = [];
         this.debugSessionId = null;
-        this.tcpPort = DEFAULT_TCP_PORT;
         this.platformToolsVersion = DEFAULT_PLATFORM_TOOLS_VERSION;
         this.lldbLibrary = this.getLldbLibraryPath();
         this.anchorProjectProgramCount = 0;
-        this.cpi = [];
+        this.currentProgramHash = null;
+        this.tcpPort = DEFAULT_TCP_PORT;
     }
 }
 
