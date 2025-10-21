@@ -1,25 +1,28 @@
 use anchor_lang::prelude::*;
 
-declare_id!("EB7VLqytTRN8AeFmQW5hMLdwQpxqMqEQbZsrFwtitLAB");
+declare_id!("G8pztLe793X3k3u8FGVdyM9aBaqY8UPYuknzKVyay9N4");
 
 #[program]
 pub mod program_b {
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        msg!("Program B ready!");
+    pub fn mocked(ctx: Context<AnotherStruct>) -> Result<()> {
+        msg!("Hello from program B: {:?}", ctx.program_id);
         Ok(())
     }
 
-    pub fn multiply(ctx: Context<Multiply>, x: u32, y: u32) -> Result<()> {
-        let result = x * y;
-        msg!("Program B: {} * {} = {}", x, y, result);
+    pub fn initialize(ctx: Context<SomeRandomStruct>) -> Result<()> {
+        msg!("Greetings from: {:?}", ctx.program_id);
         Ok(())
     }
 }
 
 #[derive(Accounts)]
-pub struct Initialize {}
+pub struct AnotherStruct<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
 
 #[derive(Accounts)]
-pub struct Multiply {}
+pub struct SomeRandomStruct {}

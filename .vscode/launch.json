@@ -13,7 +13,9 @@
             "args": [
                 "--extensionDevelopmentPath=${workspaceFolder}",
                 "--folder-uri",
-                "file:///Users/emilemilovroydev/Rust/projects/Solana/gimlet-raw/gimlet/examples/anchor-example"
+                "file:///Users/emilemilovroydev/Rust/projects/Solana/gimlet-raw/gimlet/examples/anchor-multi-program"
+                // "file:///Users/emilemilovroydev/Rust/projects/Solana/gimlet-raw/gimlet/examples/anchor-example"
+
             ],
             "outFiles": ["${workspaceFolder}/out/**/*.js"],
             "env": {
