@@ -1,11 +1,12 @@
 const { exec } = require('child_process');
 const vscode = require('vscode');
-const { debugConfigManager } = require('./DebugConfigManager');
-const debuggerSession = require('../state');
+const { debugConfigManager } = require('./debugConfigManager');
+const { globalState } = require('../state/globalState');
 
 class PortManager {
     constructor() {
-        this.pollingActiveMap = {};
+        this.pollingActiveMap = {}; // This is part of session state and should be cleaned when debugging session ends
+        this.sessionToken = 0;
     }
 
     // Used primarily for the config setup to check if the desired port is available
@@ -37,44 +38,22 @@ class PortManager {
         });
     }
 
-    // Waits for the specified TCP port to open, then starts a debug session with the given launch configuration.
-    // When the debugger disconnects, but the port is opened again, it will start the debug session again.
-    // Prevents multiple polling loops for the same session name.
-    async waitAndStartDebug(workspaceFolder, launchConfig, currentTcpPort) {
-        const sessionName = launchConfig.name;
-        if (this.pollingActiveMap[sessionName]) return;
-        this.pollingActiveMap[sessionName] = true;
-
-        while (this.pollingActiveMap[sessionName]) {
-            const isOpen = await this.isPortOpen(currentTcpPort);
-
-            const alreadyRunning = Array.isArray(vscode.debug.sessions)
-                ? vscode.debug.sessions.some(session => session.name === sessionName)
-                : false;
-
-            if (isOpen && !alreadyRunning) {
-                await vscode.debug.startDebugging(workspaceFolder, launchConfig);
-            }
-
-            await new Promise(resolve => setTimeout(resolve, 3000));
-        }
-    }
-
     /**
      * Listen for up to 4 ports (for CPI depth 4).
      * When a port opens, use the program hash to create the launch config and start debugging.
      * @param {number[]} ports - array of ports to listen on
     */
     async listenAndStartDebugForPorts(ports) {
+        this.sessionToken += 1; 
+        const myToken = this.sessionToken;
+
         const pollingKey = ports.join(',');
         if (this.pollingActiveMap[pollingKey]) return;
         this.pollingActiveMap[pollingKey] = true;
 
         // Track which ports have already started a debug session
         const startedPorts = new Set();
-        console.log('Polling for ports:', this.pollingActiveMap);
-
-        while (this.pollingActiveMap[pollingKey]) {
+        while (this.pollingActiveMap[pollingKey] && this.sessionToken === myToken) {
             for (const port of ports) {
                 if (startedPorts.has(port)) continue;
 
@@ -83,7 +62,13 @@ class PortManager {
                 if (isOpen) {
                     // When port opens get the program name from the current hash
                     const programName = await debugConfigManager.waitForProgramName();
-                    if (!programName) continue;
+                    if (!programName) {
+                        vscode.window.showErrorMessage('Timed out waiting for program name. Stopping debug session.');
+                        this.pollingActiveMap[pollingKey] = false; // Stop the while loop
+                        // TODO: After fixing outputs make this stop the Debugger
+                        // await vscode.debug.stopDebugging(); // This stops the active debug session
+                        break; // Exit the for loop 
+                    };
 
                     // Dynamically create launch config using program hash or other info
                     const launchConfig = debugConfigManager.getLaunchConfigForSolanaLldb(port, programName);
@@ -94,7 +79,7 @@ class PortManager {
                         : false;
 
                     if (!alreadyRunning) {
-                        await vscode.debug.startDebugging(debuggerSession.globalWorkspaceFolder, launchConfig);
+                        await vscode.debug.startDebugging(globalState.globalWorkspaceFolder, launchConfig);
                         startedPorts.add(port);
                     }
                 }
@@ -103,9 +88,9 @@ class PortManager {
         }
     }
 
-    // TODO: Currently no mechanism to stop polling, could be added in the future if needed
-    stopPolling(sessionName) {
-        this.pollingActiveMap[sessionName] = false;
+    cleanup() {
+        this.sessionToken += 1; // Invalidate any ongoing polling loops
+        this.pollingActiveMap = {};
     }
 }
 
