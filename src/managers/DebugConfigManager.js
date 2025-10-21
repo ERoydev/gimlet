@@ -1,8 +1,10 @@
 const path = require('path');
 const fs = require('fs');
 const toml = require('toml');
-const debuggerSession = require('../state');
+const { globalState } = require('../state/globalState');
+const { getDebuggerSession } = require('../managers/sessionManager');
 const vscode = require('vscode');
+const { spawn } = require('child_process');
 
 class DebugConfigManager {
 
@@ -28,8 +30,13 @@ class DebugConfigManager {
 
     getTypescriptTestLaunchConfig() {
         // TODO: Make sure this works for CPI tests as well
-        const workspaceFolder = debuggerSession.globalWorkspaceFolder;
+        const workspaceFolder = globalState.globalWorkspaceFolder;
         const runnerInfo = this.getTestRunnerFromAnchorToml(workspaceFolder);
+        const debuggerSession = getDebuggerSession();
+        if (!debuggerSession) {
+            vscode.window.showErrorMessage('No active debugger session found.');
+            return null;
+        }
 
         let program;
         if (runnerInfo) {
@@ -43,17 +50,31 @@ class DebugConfigManager {
             request: "launch",
             name: "SBPF Debug TypeScript Tests",
             program,
-            args: ["tests/**/*.ts"],
+            args: [
+                "tests/**/*.ts",
+            ],
             cwd: "${workspaceFolder}",
             env: {
-                "VM_DEBUG_PORT": debuggerSession.tcpPort.toString()
+                "VM_DEBUG_PORT": debuggerSession.tcpPort.toString(),
+                "TS_NODE_TRANSPILE_ONLY": "true",
             },
+            console: "internalConsole",
+            // console: "integratedTerminal",
+            // console: "externalTerminal",
             internalConsoleOptions: "openOnSessionStart",
-            console: "integratedTerminal"
+            runtimeArgs: [
+                "--experimental-network-inspection",
+            ],
         };
     }
 
     getLaunchConfigForSolanaLldb(currentTcpPort, programName) {
+        const debuggerSession = getDebuggerSession();
+        if (!debuggerSession) {
+            vscode.window.showErrorMessage('No active debugger session found.');
+            return null;
+        }
+        
         const executablesOfProgram = debuggerSession.executablesPaths[programName];
         const debugExecutablePath = executablesOfProgram ? executablesOfProgram.debugBinary : null;
 
@@ -75,14 +96,20 @@ class DebugConfigManager {
 
     // Wait until programName is available or timeout after 10 seconds
     async waitForProgramName(timeoutMs = 10000, intervalMs = 100) {
+        const debuggerSession = getDebuggerSession();
+        if (!debuggerSession) {
+            vscode.window.showErrorMessage('No active debugger session found.');
+            return null;
+        }
+
         try {
             const start = Date.now();
+
             while (Date.now() - start < timeoutMs) {
                 const programName = debuggerSession.programHashToProgramName[debuggerSession.currentProgramHash];
                 if (programName) return programName;
                 await new Promise(resolve => setTimeout(resolve, intervalMs));
             }
-            vscode.window.showErrorMessage('Timed out waiting for programName to be set.');
             return null;
         } catch (e) {
             vscode.window.showErrorMessage(e.message);
@@ -91,6 +118,52 @@ class DebugConfigManager {
             debuggerSession.currentProgramHash = null; // Reset after waiting
         }
     }
+
+    // The test executor for TS anchor tests
+    async spawnAnchorTestProcess() {
+        return new Promise((resolve, reject) => {
+            // Get the active debug console
+            const anchorProcess = spawn('anchor', ['test'], {
+                env: {
+                    ...process.env,
+                    VM_DEBUG_PORT: globalState.tcpPort.toString(),
+                },
+                cwd: globalState.globalWorkspaceFolder,
+                stdio: ['inherit', 'pipe', 'pipe']
+            });
+
+            anchorProcess.stderr.on('data', (data) => {
+                const output = data.toString();
+                
+                // Extract SHA256 hash from stderr
+                const match = output.match(/Debugging executable with \(pre-load\) SHA256: ([a-f0-9]{64})/);
+                if (match) {
+                    const hash = match[1];
+                    // Update the debug session directly
+                    const debuggerSession = getDebuggerSession();
+                    if (debuggerSession) {
+                        debuggerSession.currentProgramHash = hash;
+                    }
+                }
+            });
+
+            anchorProcess.on('error', (error) => {
+                console.error(`Failed to start anchor: ${error}`);
+                reject(error);
+            });
+
+            anchorProcess.on('close', (code) => {
+                console.log(`anchor process exited with code ${code}`);
+                if (code === 0) {
+                    resolve();
+                } else {
+                    reject(new Error(`anchor process failed with code ${code}`));
+                }
+            });
+
+            return anchorProcess;
+    });
+}
 }
 
 const debugConfigManager = new DebugConfigManager();

@@ -1,5 +1,5 @@
 const BaseBuildStrategy = require('./baseBuildStrategy');
-const debuggerSession = require('../state');
+const { getDebuggerSession }  = require('../managers/sessionManager');
 const vscode = require('vscode');
 const fs = require('fs');
 const { exec } = require('child_process');
@@ -14,6 +14,7 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
     ) {
         super(workspaceFolder, depsPath, availablePrograms);
         this.buildCommand = buildCommand;
+        this.debuggerSession = getDebuggerSession();
     }
 
     static get BUILD_TYPE() {
@@ -29,7 +30,7 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
         if (!files) return;
 
         const executablesPaths = this.findExecutables(files);
-        debuggerSession.executablesPaths = executablesPaths;
+        this.debuggerSession.executablesPaths = executablesPaths;
 
         for (let packageName of this.availablePrograms) {
             if (!executablesPaths[packageName]) {

@@ -1,4 +1,4 @@
-const debuggerSession = require('../state');
+const { globalState } = require('../state/globalState');
 
 /**
  * Solana BPF build commands with debug symbols enabled for debugging support.
@@ -13,7 +13,7 @@ const BuildCommands = {
     // SBF V1 build with specific platform tools `v1.51`
     // - arch v1: Targets the newer BPF virtual machine architecture
     // This is a build without optimizations, applying the dynamic stack frames
-    SBF_V1_DEBUG: () => `cargo-build-sbf --tools-version v${debuggerSession.platformToolsVersion} --debug --arch v1`,
+    SBF_V1_DEBUG: () => `cargo-build-sbf --tools-version v${globalState.platformToolsVersion} --debug --arch v1`,
     // future platform tools / SBF versions can be added here
 }
 
