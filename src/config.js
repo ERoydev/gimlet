@@ -1,8 +1,8 @@
 const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
-const debuggerSession = require('./state');
-const portManager = require('./managers/PortManager')
+const { globalState } = require('./state/globalState');
+const portManager = require('./managers/portManager')
 
 class GimletConfigManager {
     constructor() {
@@ -19,7 +19,7 @@ class GimletConfigManager {
         }
 
         this.workspaceFolder = folders[0].uri.fsPath;
-        debuggerSession.globalWorkspaceFolder = this.workspaceFolder;
+        globalState.globalWorkspaceFolder = this.workspaceFolder;
         return this.workspaceFolder;
     }
 
@@ -29,7 +29,6 @@ class GimletConfigManager {
 
         this.depsPath = path.join(workspaceFolder, 'target', 'deploy');
         this.inputPath = path.join(workspaceFolder, 'input');
-        debuggerSession.globalInputPath = this.inputPath;
 
         return {
             depsPath: this.depsPath,
@@ -44,16 +43,18 @@ class GimletConfigManager {
         const vscodeDir = path.join(workspaceFolder, '.vscode');
         const configPath = path.join(vscodeDir, 'gimlet.json');
 
-        const available = await portManager.isPortAvailable(debuggerSession.tcpPort);
-        if (!available) {
-            vscode.window.showErrorMessage(
-                `Port ${debuggerSession.tcpPort} is already in use by another service. Please choose a different port in your Gimlet config.`
-            );
-        }
+        // const available = await portManager.isPortAvailable(debuggerSession.tcpPort);
+        // if (!available) {
+        //     vscode.window.showErrorMessage(
+        //         `Port ${debuggerSession.tcpPort} is already in use by another service. Please choose a different port in your Gimlet config.`
+        //     );
+        // }
+
+
         
         const defaultConfig = {
-            tcpPort: debuggerSession.tcpPort,
-            platformToolsVersion: debuggerSession.platformToolsVersion,
+            tcpPort: globalState.tcpPort,
+            platformToolsVersion: globalState.platformToolsVersion,
         };
 
         if (!fs.existsSync(vscodeDir)) {
@@ -88,7 +89,7 @@ class GimletConfigManager {
                 const config = JSON.parse(configContent);
 
                 // Update your state here
-                debuggerSession.setConfig(config);
+                globalState.setConfig(config);
 
                 vscode.window.showInformationMessage('Gimlet config updated and state refreshed.');
             } catch (err) {
