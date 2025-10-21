@@ -1,12 +1,13 @@
 const crypto = require('crypto');
 const fs = require('fs');
-const debuggerSession = require('../state');
+const { getDebuggerSession } = require('../managers/sessionManager');
 
 class BaseBuildStrategy {
     constructor(workspaceFolder, depsPath, availablePrograms) {
         this.workspaceFolder = workspaceFolder;
         this.depsPath = depsPath;
         this.availablePrograms = availablePrograms; // List of available programs after build
+        this.debuggerSession = getDebuggerSession();
     }
 
     async build() {
@@ -35,7 +36,8 @@ class BaseBuildStrategy {
             
             const bpfProgramHash = this._sha256FileSync(bpfSoBinaryPath);
 
-            debuggerSession.setProgramNameForHash(bpfProgramHash, packageName);
+            // The idea is that i create a mapping of programHash to programName, so when can provide the correct executable to the debugger
+            this.debuggerSession.setProgramNameForHash(bpfProgramHash, packageName);
 
             // Map package name to its corresponding debug and .so paths
             executables[packageName] = {

@@ -3,17 +3,21 @@ const path = require('path');
 const fs = require('fs');
 
 const gimletConfigManager  = require('./config');
-const debuggerSession = require('./state');
+const { globalState } = require('./state/globalState');
+const { createSessionState } = require('./state/sessionState');
 
 const { findSolanaPackageName } = require('./projectStructure');
 
-const { SbpfV1BuildStrategy } = require('./build/SbpfV1BuildStrategy');
-const { GimletCodeLensProvider } = require('./lens/GimletCodeLensProvider');
+const { SbpfV1BuildStrategy } = require('./build/sbpfV1BuildStrategy');
+const { GimletCodeLensProvider } = require('./lens/gimletCodeLensProvider');
 
-const { lldbSettingsManager, rustAnalyzerSettingsManager, editorSettingsManager } = require('./managers/VsCodeSettingsManager');
-const portManager = require('./managers/PortManager')
-const { debugConfigManager } = require('./managers/DebugConfigManager');
+const { lldbSettingsManager, rustAnalyzerSettingsManager, editorSettingsManager } = require('./managers/vscodeSettingsManager');
+const portManager = require('./managers/portManager')
+const { debugConfigManager } = require('./managers/debugConfigManager');
 
+const { setDebuggerSession, clearDebuggerSession } = require('./managers/sessionManager');
+
+let debuggerSession = null;
 
 async function SbpfCompile() {
     const { depsPath } = await gimletConfigManager.resolveGimletConfig();
@@ -24,7 +28,7 @@ async function SbpfCompile() {
         );
     }
 
-    const programNamesList = await findSolanaPackageName(debuggerSession.globalWorkspaceFolder);
+    const programNamesList = await findSolanaPackageName(globalState.globalWorkspaceFolder);
     debuggerSession.executables = programNamesList;
 
     if (programNamesList.length == 0 || !programNamesList) {
@@ -34,8 +38,8 @@ async function SbpfCompile() {
         return;
     }
 
-    // TODO: Implement a dispatcher for different build strategies
-    debuggerSession.buildStrategy = new SbpfV1BuildStrategy(debuggerSession.globalWorkspaceFolder, depsPath, programNamesList);
+    // TODO: Implement a dispatcher for different build strategies if decide to add more in the future
+    debuggerSession.buildStrategy = new SbpfV1BuildStrategy(globalState.globalWorkspaceFolder, depsPath, programNamesList);
 
     return vscode.window.withProgress(
         {
@@ -88,14 +92,11 @@ async function activate(context) {
         new GimletCodeLensProvider()
     );
 
-    // Listener to clean up after debug session ends
+    // Listener to handle when debug ends and extension can clean up
     vscode.debug.onDidTerminateDebugSession(session => {
-        console.log('Debug session terminated:', session.name);
         if (session.id === debuggerSession.debugSessionId) {
-            debuggerSession.reset();
-            // debuggerSession.debugSessionId = null;
-            
-            lldbSettingsManager.restore('library');
+            portManager.cleanup(); // Clean up any active port polling when session ends
+            cleanupDebuggerSession();
         }
     });
 
@@ -128,10 +129,18 @@ async function activate(context) {
     });
         
     const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document) => {
-        if (debuggerSession.debugSessionId) {
+        // Prevent starting a new session if one is already running
+        if (debuggerSession && debuggerSession.debugSessionId) {
             vscode.window.showErrorMessage('A Gimlet debug session is already running. Please stop the current session before starting a new one.');
             return;
         }
+
+        // Always create a new session state for a new debug session
+        const sessionStateInstance = createSessionState();
+        setDebuggerSession(sessionStateInstance);
+        debuggerSession = sessionStateInstance;
+        
+        debuggerSession.tcpPort = globalState.tcpPort;
         const language = document.languageId;
 
         try {
@@ -148,6 +157,7 @@ async function activate(context) {
             try {
                 if (language == 'rust') {
                     const debugListener = vscode.debug.onDidStartDebugSession(session => {
+                        // Literally this is the place where the debugging starts
                         if (session.type === 'lldb' || session.type === 'rust-analyzer') {
                             debuggerSession.debugSessionId = session.id;
                         }
@@ -161,19 +171,14 @@ async function activate(context) {
                         return;
                     }
 
-                    await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
+                    await lldbSettingsManager.set('library', globalState.lldbLibrary);
                     // // When we have multiple programs, we need to start multiple debug sessions
                     await startPortDebugListeners();
                 } else if (language == 'typescript') {
-                    // TODO: Test for typescript
-                    // TODO: Implement everything for typescript
-                    const launchConfig = debugConfigManager.getTypescriptTestLaunchConfig();
-                    vscode.debug.startDebugging(
-                        vscode.workspace.workspaceFolders[0], // or undefined for current folder
-                        launchConfig
-                    );
+                    // typescript debug command to run the tests 
+                    debugConfigManager.spawnAnchorTestProcess();
 
-                    await lldbSettingsManager.set('library', debuggerSession.lldbLibrary);
+                    await lldbSettingsManager.set('library', globalState.lldbLibrary);
                     await startPortDebugListeners();
                 }
             } finally {
@@ -198,36 +203,30 @@ async function activate(context) {
 }
 
 function deactivate() {
-    if (debuggerSession.breakpointListenerDisposable) {
-        debuggerSession.breakpointListenerDisposable.dispose();
-        debuggerSession.breakpointListenerDisposable = null;
-    }
-    debuggerSession.activeTerminal = null;
-
-    if (
-        debuggerSession.functionAddressMapPath &&
-        fs.existsSync(debuggerSession.functionAddressMapPath)
-    ) {
-        fs.unlinkSync(debuggerSession.functionAddressMapPath); // Delete the function address map file
-        debuggerSession.functionAddressMapPath = null; // Clear the path after deletion
-    }
-
-    lldbSettingsManager.disable('library');
-    rustAnalyzerSettingsManager.restore('debug.engine');
-    editorSettingsManager.restore('codeLens'); 
+    cleanupDebuggerSession();
 }
 
 
 async function startPortDebugListeners() {
     const initialTcpPort = debuggerSession.tcpPort;
-    const ports = [
-        initialTcpPort,
-        initialTcpPort + 1,
-        initialTcpPort + 2,
-        initialTcpPort + 3,
-    ];
-    debuggerSession.tcpPort += 4; // Increment for next potential debug session
+    const CPI_PORT_COUNT = 4; // Solana currently supports up to 4 for CPI
+
+    const ports = [];
+    for (let i = 0; i < CPI_PORT_COUNT; i++) {
+        ports.push(initialTcpPort + i);
+    }
+
+    debuggerSession.tcpPort += CPI_PORT_COUNT;
     portManager.listenAndStartDebugForPorts(ports);
+}
+
+function cleanupDebuggerSession() {
+    debuggerSession = null;
+    clearDebuggerSession();
+
+    lldbSettingsManager.disable('library');
+    rustAnalyzerSettingsManager.restore('debug.engine');
+    editorSettingsManager.restore('codeLens'); 
 }
 
 module.exports = {
