@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const vscode = require('vscode');
-const debuggerSession = require('./state');
+const { globalState } = require('./state/globalState');
 
 
 // Attempts to find the package name and anchor status for a Solana project.
@@ -10,7 +10,6 @@ async function findSolanaPackageName(workspaceFolder) {
     // Check Anchor structure (programs/[package-name]/Cargo.toml)
     const programsDir = path.join(workspaceFolder, 'programs');
     const anchorProgramNames = getAnchorProgramNames(); // Array of program names
-    debuggerSession.anchorProjectProgramCount = anchorProgramNames.length; // Set the count of anchor programs
 
     if (fs.existsSync(programsDir) && anchorProgramNames.length > 0) {
         for (const programName of anchorProgramNames) {
@@ -52,7 +51,7 @@ function checkIfAnchorCargoExists(anchorCargoPath, dir) {
 
 // Returns an array of program names (directory names) in the `programs` directory
 function getAnchorProgramNames() {
-    const programsDir = path.join(debuggerSession.globalWorkspaceFolder, 'programs');
+    const programsDir = path.join(globalState.globalWorkspaceFolder, 'programs');
     if (!fs.existsSync(programsDir)) return [];
 
     return fs.readdirSync(programsDir)
