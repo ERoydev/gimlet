@@ -162,8 +162,8 @@ async function activate(context) {
                             debuggerSession.debugSessionId = session.id;
                         }
                     });
-                    // rust-analyzer command to debug reusing the client and runnables it creates initially
-                    const result = await vscode.commands.executeCommand("rust-analyzer.debug");
+                    
+                    const result = await startRustAnalyzerDebugSession();
                     debugListener.dispose();
                     
                     if (!result) {
@@ -172,7 +172,7 @@ async function activate(context) {
                     }
 
                     await lldbSettingsManager.set('library', globalState.lldbLibrary);
-                    // // When we have multiple programs, we need to start multiple debug sessions
+                    // When we have multiple programs, we need to start multiple debug sessions
                     await startPortDebugListeners();
                 } else if (language == 'typescript') {
                     // typescript debug command to run the tests 
@@ -225,8 +225,25 @@ function cleanupDebuggerSession() {
     clearDebuggerSession();
 
     lldbSettingsManager.disable('library');
-    rustAnalyzerSettingsManager.restore('debug.engine');
+    // rustAnalyzerSettingsManager.disable('debug.engine');
+    rustAnalyzerSettingsManager.disable('debug.engineSettings');
+    rustAnalyzerSettingsManager.disable('runnables.extraTestBinaryArgs');
     editorSettingsManager.restore('codeLens'); 
+}
+
+async function startRustAnalyzerDebugSession() {
+    rustAnalyzerSettingsManager.set('debug.engineSettings', {
+        "lldb": {
+            "terminal": "external"
+        }
+    });
+    rustAnalyzerSettingsManager.set('runnables.extraTestBinaryArgs', [
+        "--show-output",
+        "--nocapture"
+    ]);
+
+    // rust-analyzer command to debug reusing the client and runnables it creates initially
+    return await vscode.commands.executeCommand("rust-analyzer.debug");
 }
 
 module.exports = {
