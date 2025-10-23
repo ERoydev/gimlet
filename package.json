@@ -2,7 +2,7 @@
     "name": "gimlet-beta",
     "displayName": "Gimlet-beta",
     "description": "Debug Solana programs easily",
-    "publisher": "Emil Roydev",
+    "publisher": "emilroydev",
     "icon": "images/logo.png",
     "version": "0.0.11",
     "engines": {
