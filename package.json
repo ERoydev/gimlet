@@ -4,7 +4,7 @@
     "description": "Debug Solana programs easily",
     "publisher": "emilroydev",
     "icon": "images/logo.png",
-    "version": "0.0.5",
+    "version": "0.0.6",
     "engines": {
         "vscode": "^1.104.0"
     },
@@ -62,9 +62,5 @@
     "repository": {
         "type": "git",
         "url": "https://github.com/ERoydev/gimlet.git#dev/initial-version"
-    },
-    "dependencies": {
-        "mocha": "^11.7.4",
-        "toml": "^3.0.0"
     }
 }

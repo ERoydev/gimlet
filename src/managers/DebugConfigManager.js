@@ -1,6 +1,6 @@
-const path = require('path');
 const fs = require('fs');
-const toml = require('toml');
+// const path = require('path');
+// const toml = require('toml');
 const { globalState } = require('../state/globalState');
 const { getDebuggerSession } = require('../managers/sessionManager');
 const vscode = require('vscode');
@@ -8,25 +8,25 @@ const { spawn } = require('child_process');
 const { VM_DEBUG_EXEC_INFO_FILE } = require('../constants');
 class DebugConfigManager {
 
-    getTestRunnerFromAnchorToml(workspaceFolder) {
-        const anchorTomlPath = path.join(workspaceFolder, 'Anchor.toml');
-        if (!fs.existsSync(anchorTomlPath)) return null;
-        const tomlContent = fs.readFileSync(anchorTomlPath, 'utf8');
-        const config = toml.parse(tomlContent);
+    // getTestRunnerFromAnchorToml(workspaceFolder) {
+    //     const anchorTomlPath = path.join(workspaceFolder, 'Anchor.toml');
+    //     if (!fs.existsSync(anchorTomlPath)) return null;
+    //     const tomlContent = fs.readFileSync(anchorTomlPath, 'utf8');
+    //     const config = toml.parse(tomlContent);
     
-        if (config.scripts && config.scripts.test) {
-            // Example: "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
-            const testScript = config.scripts.test;
-            // Extract runner and args (simple heuristic)
-            const match = testScript.match(/(?:yarn run |npx )?([^\s]+)(.*)/);
-            if (match) {
-                const runner = match[1]; // e.g., ts-mocha
-                const args = match[2].trim().split(/\s+/); // split args
-                return { runner, args };
-            }
-        }
-        return null;
-    }
+    //     if (config.scripts && config.scripts.test) {
+    //         // Example: "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+    //         const testScript = config.scripts.test;
+    //         // Extract runner and args (simple heuristic)
+    //         const match = testScript.match(/(?:yarn run |npx )?([^\s]+)(.*)/);
+    //         if (match) {
+    //             const runner = match[1]; // e.g., ts-mocha
+    //             const args = match[2].trim().split(/\s+/); // split args
+    //             return { runner, args };
+    //         }
+    //     }
+    //     return null;
+    // }
 
     getLaunchConfigForSolanaLldb(currentTcpPort, programName) {
         const debuggerSession = getDebuggerSession();
