@@ -2,7 +2,6 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const { globalState } = require('./state/globalState');
-const portManager = require('./managers/portManager')
 
 class GimletConfigManager {
     constructor() {
@@ -49,8 +48,6 @@ class GimletConfigManager {
         //         `Port ${debuggerSession.tcpPort} is already in use by another service. Please choose a different port in your Gimlet config.`
         //     );
         // }
-
-
         
         const defaultConfig = {
             tcpPort: globalState.tcpPort,
