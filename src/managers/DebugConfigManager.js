@@ -5,7 +5,7 @@ const { globalState } = require('../state/globalState');
 const { getDebuggerSession } = require('../managers/sessionManager');
 const vscode = require('vscode');
 const { spawn } = require('child_process');
-
+const { VM_DEBUG_EXEC_INFO_FILE } = require('../constants');
 class DebugConfigManager {
 
     getTestRunnerFromAnchorToml(workspaceFolder) {
@@ -26,46 +26,6 @@ class DebugConfigManager {
             }
         }
         return null;
-    }
-
-    getTypescriptTestLaunchConfig() {
-        // TODO: Make sure this works for CPI tests as well
-        const workspaceFolder = globalState.globalWorkspaceFolder;
-        const runnerInfo = this.getTestRunnerFromAnchorToml(workspaceFolder);
-        const debuggerSession = getDebuggerSession();
-        if (!debuggerSession) {
-            vscode.window.showErrorMessage('No active debugger session found.');
-            return null;
-        }
-
-        let program;
-        if (runnerInfo) {
-            program = path.join(workspaceFolder, 'node_modules', runnerInfo.runner, 'bin', runnerInfo.runner);
-        } else {
-            program = path.join(workspaceFolder, 'node_modules/ts-mocha/bin/ts-mocha');
-        }
-
-        return {
-            type: "node",
-            request: "launch",
-            name: "SBPF Debug TypeScript Tests",
-            program,
-            args: [
-                "tests/**/*.ts",
-            ],
-            cwd: "${workspaceFolder}",
-            env: {
-                "VM_DEBUG_PORT": debuggerSession.tcpPort.toString(),
-                "TS_NODE_TRANSPILE_ONLY": "true",
-            },
-            console: "internalConsole",
-            // console: "integratedTerminal",
-            // console: "externalTerminal",
-            internalConsoleOptions: "openOnSessionStart",
-            runtimeArgs: [
-                "--experimental-network-inspection",
-            ],
-        };
     }
 
     getLaunchConfigForSolanaLldb(currentTcpPort, programName) {
@@ -103,11 +63,17 @@ class DebugConfigManager {
         }
 
         try {
+            this.pollForTmpFile(debuggerSession, timeoutMs); 
             const start = Date.now();
 
             while (Date.now() - start < timeoutMs) {
+                // TODO: Handle situations where we have a CPI to a program that is not in this project.
+                // It will not be in our map and we need to handle that case.
                 const programName = debuggerSession.programHashToProgramName[debuggerSession.currentProgramHash];
-                if (programName) return programName;
+                if (programName) {
+                    debuggerSession.tmpFilePollToken = null; // Stop polling
+                    return programName;
+                };
                 await new Promise(resolve => setTimeout(resolve, intervalMs));
             }
             return null;
@@ -116,6 +82,7 @@ class DebugConfigManager {
             return null;
         } finally {
             debuggerSession.currentProgramHash = null; // Reset after waiting
+            debuggerSession.tmpFilePollToken = null; // Stop polling
         }
     }
 
@@ -136,6 +103,7 @@ class DebugConfigManager {
                 const output = data.toString();
                 
                 // Extract SHA256 hash from stderr
+                // TODO: use the output in /tmp/... instead of this
                 const match = output.match(/Debugging executable with \(pre-load\) SHA256: ([a-f0-9]{64})/);
                 if (match) {
                     const hash = match[1];
@@ -162,8 +130,45 @@ class DebugConfigManager {
             });
 
             return anchorProcess;
-    });
-}
+        });
+    }
+
+    async pollForTmpFile(debuggerSession, timeoutMs = 10000) {
+        const filePath = VM_DEBUG_EXEC_INFO_FILE;
+        const intervalMs = 1000; // Poll every second
+        
+        const pollToken = Symbol('tmp-file-poll');
+        debuggerSession.tmpFilePollToken = pollToken;
+        
+        const start = Date.now();
+        
+        while (debuggerSession.tmpFilePollToken === pollToken && (Date.now() - start < timeoutMs)) {
+            try {
+                if (fs.existsSync(filePath)) {
+                    const content = fs.readFileSync(filePath, 'utf8');
+                    vscode.window.showInformationMessage(`Found VM output: ${content}`);
+                    
+                    // Set the hash so waitForProgramName can use it
+                    debuggerSession.currentProgramHash = content.trim();
+                    
+                    // delete the file after reading
+                    fs.unlinkSync(filePath);
+                    
+                    break; // Stop polling once file is found
+                }
+            } catch (err) {
+                console.error(`Error reading ${VM_DEBUG_EXEC_INFO_FILE} file`, err);
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+        }
+        
+        if (Date.now() - start >= timeoutMs) {
+            vscode.window.showWarningMessage(`Timeout: ${VM_DEBUG_EXEC_INFO_FILE} not found`);
+        }
+        
+        debuggerSession.tmpFilePollToken = null;
+    }
 }
 
 const debugConfigManager = new DebugConfigManager();

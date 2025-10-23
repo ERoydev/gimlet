@@ -5,8 +5,7 @@ const { globalState } = require('../state/globalState');
 
 class PortManager {
     constructor() {
-        this.pollingActiveMap = {}; // This is part of session state and should be cleaned when debugging session ends
-        this.sessionToken = 0;
+        this.pollingTokens = {}; // Map of pollingKey -> token
     }
 
     // Used primarily for the config setup to check if the desired port is available
@@ -44,16 +43,15 @@ class PortManager {
      * @param {number[]} ports - array of ports to listen on
     */
     async listenAndStartDebugForPorts(ports) {
-        this.sessionToken += 1; 
-        const myToken = this.sessionToken;
-
         const pollingKey = ports.join(',');
-        if (this.pollingActiveMap[pollingKey]) return;
-        this.pollingActiveMap[pollingKey] = true;
+        if (this.pollingTokens[pollingKey]) return;
+
+        const myToken = Symbol();
+        this.pollingTokens[pollingKey] = myToken;
 
         // Track which ports have already started a debug session
         const startedPorts = new Set();
-        while (this.pollingActiveMap[pollingKey] && this.sessionToken === myToken) {
+        while (this.pollingTokens[pollingKey] === myToken) {
             for (const port of ports) {
                 if (startedPorts.has(port)) continue;
 
@@ -63,11 +61,10 @@ class PortManager {
                     // When port opens get the program name from the current hash
                     const programName = await debugConfigManager.waitForProgramName();
                     if (!programName) {
-                        vscode.window.showErrorMessage('Timed out waiting for program name. Stopping debug session.');
-                        this.pollingActiveMap[pollingKey] = false; // Stop the while loop
-                        // TODO: After fixing outputs make this stop the Debugger
-                        // await vscode.debug.stopDebugging(); // This stops the active debug session
-                        break; // Exit the for loop 
+                        vscode.window.showErrorMessage('Timed out waiting for program. Stopping debug session.');
+                        delete this.pollingTokens[pollingKey]; // Stop the while loop
+                        await vscode.debug.stopDebugging(); // This stops the active debug session
+                        break;
                     };
 
                     // Dynamically create launch config using program hash or other info
@@ -86,11 +83,11 @@ class PortManager {
             }
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
+        delete this.pollingTokens[pollingKey];
     }
 
     cleanup() {
-        this.sessionToken += 1; // Invalidate any ongoing polling loops
-        this.pollingActiveMap = {};
+        this.pollingTokens = {};
     }
 }
 
