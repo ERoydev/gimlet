@@ -16,6 +16,7 @@ const portManager = require('./managers/portManager')
 const { debugConfigManager } = require('./managers/debugConfigManager');
 
 const { setDebuggerSession, clearDebuggerSession } = require('./managers/sessionManager');
+const { VM_DEBUG_EXEC_INFO_FILE } = require('./constants');
 
 let debuggerSession = null;
 
@@ -38,7 +39,7 @@ async function SbpfCompile() {
         return;
     }
 
-    // TODO: Implement a dispatcher for different build strategies if decide to add more in the future
+    // TODO: Implement a dispatcher for different build strategies if we decide to add more in the future
     debuggerSession.buildStrategy = new SbpfV1BuildStrategy(globalState.globalWorkspaceFolder, depsPath, programNamesList);
 
     return vscode.window.withProgress(
@@ -72,7 +73,6 @@ async function activate(context) {
     rustAnalyzerSettingsManager.set('debug.engine', 'vadimcn.vscode-lldb');
     editorSettingsManager.set('codeLens', true);
     
-
     // This is automated script to check dependencies for Gimlet
     const setupDisposable = vscode.commands.registerCommand(
         'extension.runGimletSetup',
@@ -99,34 +99,6 @@ async function activate(context) {
             cleanupDebuggerSession();
         }
     });
-
-    // Only captures output sent to the Debug Console (via the debug adapter).
-    // Used to extract the program hash of the program that litesvm starts a VM for.
-    vscode.debug.registerDebugAdapterTrackerFactory('*', {
-        // Its important to set in rust-analyzer.debug.engineSettings the lldb.terminal to external
-        createDebugAdapterTracker(session) {
-            if (session.type === 'lldb' || session.type === 'rust-analyzer') {
-            return {
-                // Have in min here i can implement `onWillStartSession` and `onWillStopSession` to manage states if needed
-                onDidSendMessage(message) {
-                if (message.type === 'event' && message.event === 'output') {
-                    const body = message.body;
-                    const output = body.output || '';
-
-                    // Regex to match a SHA256 hash (64 hex characters)
-                    // TODO: Fix the regex to be more specific
-                    const shaMatch = output.match(/[a-f0-9]{64}/i);
-                    if (shaMatch) {
-                        const programHash = shaMatch[0];
-                        debuggerSession.currentProgramHash = programHash;
-                    }
-                }
-                },
-            };
-            }
-            return undefined;
-        }
-    });
         
     const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document) => {
         // Prevent starting a new session if one is already running
@@ -147,9 +119,11 @@ async function activate(context) {
             await SbpfCompile();
             await new Promise(resolve => setTimeout(resolve, 500));
 
-            const originalValue = process.env.VM_DEBUG_PORT;
-            // ENV for SBPF VM, this enables litesvm to create a debug server on this port for remote debugging
+            const originalEnvPortValue = process.env.VM_DEBUG_PORT;
+            const originalEnvOutputValue = process.env.VM_DEBUG_EXEC_INFO_FILE;
+
             process.env.VM_DEBUG_PORT = debuggerSession.tcpPort.toString();
+            process.env.VM_DEBUG_EXEC_INFO_FILE = VM_DEBUG_EXEC_INFO_FILE;
 
             // remove the lldb.library setting to allow rust-analyzer/typescript test debugger to work properly
             await lldbSettingsManager.disable('library');
@@ -172,7 +146,6 @@ async function activate(context) {
                     }
 
                     await lldbSettingsManager.set('library', globalState.lldbLibrary);
-                    // When we have multiple programs, we need to start multiple debug sessions
                     await startPortDebugListeners();
                 } else if (language == 'typescript') {
                     // typescript debug command to run the tests 
@@ -183,10 +156,16 @@ async function activate(context) {
                 }
             } finally {
                 // Cleanup strategy for the ENV after command execution
-                if (originalValue === undefined) {
+                if (originalEnvPortValue === undefined) {
                     delete process.env.VM_DEBUG_PORT;
                 } else {
-                    process.env.VM_DEBUG_PORT = originalValue;
+                    process.env.VM_DEBUG_PORT = originalEnvPortValue;
+                }
+
+                if (originalEnvOutputValue === undefined) {
+                    delete process.env.VM_DEBUG_EXEC_INFO_FILE;
+                } else {
+                    process.env.VM_DEBUG_EXEC_INFO_FILE = originalEnvOutputValue;
                 }
             }
         } catch (err) {
@@ -206,7 +185,6 @@ function deactivate() {
     cleanupDebuggerSession();
 }
 
-
 async function startPortDebugListeners() {
     const initialTcpPort = debuggerSession.tcpPort;
     const CPI_PORT_COUNT = 4; // Solana currently supports up to 4 for CPI
@@ -223,29 +201,12 @@ async function startPortDebugListeners() {
 function cleanupDebuggerSession() {
     debuggerSession = null;
     clearDebuggerSession();
-
-    lldbSettingsManager.disable('library');
-    // rustAnalyzerSettingsManager.disable('debug.engine');
-    rustAnalyzerSettingsManager.disable('debug.engineSettings');
-    rustAnalyzerSettingsManager.disable('runnables.extraTestBinaryArgs');
-    editorSettingsManager.restore('codeLens'); 
 }
 
 async function startRustAnalyzerDebugSession() {
-    rustAnalyzerSettingsManager.set('debug.engineSettings', {
-        "lldb": {
-            "terminal": "external"
-        }
-    });
-    rustAnalyzerSettingsManager.set('runnables.extraTestBinaryArgs', [
-        "--show-output",
-        "--nocapture"
-    ]);
-
     // rust-analyzer command to debug reusing the client and runnables it creates initially
     return await vscode.commands.executeCommand("rust-analyzer.debug");
 }
-
 module.exports = {
     activate,
     deactivate,
