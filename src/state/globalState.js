@@ -1,12 +1,10 @@
-require('dotenv').config();
-
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
 
 // Shared state container for the debugger session
-const DEFAULT_TCP_PORT = process.env.DEFAULT_TCP_PORT || 6612;
-const DEFAULT_PLATFORM_TOOLS_VERSION = process.env.DEFAULT_PLATFORM_TOOLS_VERSION || '1.51';
+const DEFAULT_TCP_PORT = 6612;
+const DEFAULT_PLATFORM_TOOLS_VERSION = '1.51';
 const LIB_EXT = process.platform === 'darwin' ? 'dylib' : 'so';
 
 // General (global) state, singleton
