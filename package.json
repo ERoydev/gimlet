@@ -1,12 +1,12 @@
 {
-    "name": "gimlet",
-    "displayName": "Gimlet",
+    "name": "gimlet-beta",
+    "displayName": "Gimlet-beta",
     "description": "Debug Solana programs easily",
-    "publisher": "limechain",
+    "publisher": "Emil Roydev",
     "icon": "images/logo.png",
     "version": "0.0.11",
     "engines": {
-        "vscode": "^1.50.0"
+        "vscode": "^1.104.0"
     },
     "categories": [
         "Other"
