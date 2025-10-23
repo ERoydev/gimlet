@@ -4,7 +4,7 @@
     "description": "Debug Solana programs easily",
     "publisher": "emilroydev",
     "icon": "images/logo.png",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "engines": {
         "vscode": "^1.104.0"
     },
