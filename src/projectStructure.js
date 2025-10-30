@@ -4,17 +4,17 @@ const vscode = require('vscode');
 const { globalState } = require('./state/globalState');
 
 
-// Attempts to find the package name and anchor status for a Solana project.
+// Attempts to find the package name.
 async function findSolanaPackageName(workspaceFolder) {
 
-    // Check Anchor structure (programs/[package-name]/Cargo.toml)
+    // 1. Anchor structure (programs/[package-name]/Cargo.toml)
     const programsDir = path.join(workspaceFolder, 'programs');
-    const anchorProgramNames = getAnchorProgramNames(); // Array of program names
+    const anchorProgramNames = getProgramNames(); // Array of program names
 
     if (fs.existsSync(programsDir) && anchorProgramNames.length > 0) {
         for (const programName of anchorProgramNames) {
             const anchorCargoPath = path.join(programsDir, programName, 'Cargo.toml');
-            const foundPackageName = checkIfAnchorCargoExists(anchorCargoPath, programName);
+            const foundPackageName = getPackageNameFromCargo(anchorCargoPath, programName);
             if (!foundPackageName) {
                 vscode.window.showErrorMessage(
                     `Cargo.toml not found in program: ${programName}`
@@ -24,21 +24,29 @@ async function findSolanaPackageName(workspaceFolder) {
         }
         return anchorProgramNames;
     }
+
+    // Native structure
+    const nativeCargoPath = path.join(workspaceFolder, 'Cargo.toml');
+    if (fs.existsSync(nativeCargoPath)) {
+        const foundPackageName = getPackageNameFromCargo(nativeCargoPath, workspaceFolder);
+        return foundPackageName
+    }
+    // Not found
 }
 
-function checkIfAnchorCargoExists(anchorCargoPath, dir) {
-    if (fs.existsSync(anchorCargoPath)) {
+function getPackageNameFromCargo(cargoPath, dir) {
+    if (fs.existsSync(cargoPath)) {
         try {
-            const cargoToml = fs.readFileSync(anchorCargoPath, 'utf8');
+            const cargoToml = fs.readFileSync(cargoPath, 'utf8');
             const packageNameMatch = cargoToml.match(
                 /^\s*name\s*=\s*"([^"]+)"/m
             );
             if (packageNameMatch) {
-                return packageNameMatch[1]; // Return the package name instead of setting global variable
+                return [packageNameMatch[1]]; // Return the package name as an array
             }
         } catch (readError) {
             console.error(
-                `Failed to read ${anchorCargoPath}: ${readError.message}`
+                `Failed to read ${cargoPath}: ${readError.message}`
             );
             vscode.window.showWarningMessage(
                 `Error reading program ${dir} Cargo.toml: ${readError.message}`
@@ -50,7 +58,7 @@ function checkIfAnchorCargoExists(anchorCargoPath, dir) {
 }
 
 // Returns an array of program names (directory names) in the `programs` directory
-function getAnchorProgramNames() {
+function getProgramNames() {
     const programsDir = path.join(globalState.globalWorkspaceFolder, 'programs');
     if (!fs.existsSync(programsDir)) return [];
 
