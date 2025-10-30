@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const path = require('path');
-const fs = require('fs');
+const fs = require('fs/promises');
+const toml = require('toml');
 
 const gimletConfigManager  = require('./config');
 const { globalState } = require('./state/globalState');
@@ -23,7 +24,7 @@ let debuggerSession = null;
 async function SbpfCompile() {
     const { depsPath } = await gimletConfigManager.resolveGimletConfig();
 
-    if (!fs.existsSync(depsPath)) {
+    if (!await fileExists(depsPath)) {
         vscode.window.showInformationMessage(
             'Target folder not found. Cargo is installing necessary tools.'
         );
@@ -66,6 +67,17 @@ async function SbpfCompile() {
  * @param {vscode.ExtensionContext} context
  */
 async function activate(context) {
+    const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri; // you said you already have it
+    if (!workspaceUri) return;
+
+    const rootPath = workspaceUri.fsPath;
+    const hasLitesvm = await hasLitesvmDependency(rootPath);
+
+    if (!hasLitesvm) {
+        // Don't activate the extension if litesvm is not found
+        return;
+    }
+
     gimletConfigManager.ensureGimletConfig();
     gimletConfigManager.watchGimletConfig(context);
 
@@ -103,7 +115,16 @@ async function activate(context) {
     const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document) => {
         // Prevent starting a new session if one is already running
         if (debuggerSession && debuggerSession.debugSessionId) {
-            vscode.window.showErrorMessage('A Gimlet debug session is already running. Please stop the current session before starting a new one.');
+            vscode.window.showInformationMessage('A Gimlet debug session is already running. Please stop the current session before starting a new one.');
+            return;
+        }
+
+        console.log(globalState.globalWorkspaceFolder);
+        const hasLitesvm = await hasLitesvmDependency(globalState.globalWorkspaceFolder); 
+
+        if (!hasLitesvm) {
+            // Don't activate the extension if litesvm is not found
+            vscode.window.showInformationMessage('Litesvm dependency not found in Cargo.toml. Please add litesvm to your dependencies to use Gimlet debugging features.');
             return;
         }
 
@@ -118,6 +139,7 @@ async function activate(context) {
         try {
             await SbpfCompile();
             await new Promise(resolve => setTimeout(resolve, 500));
+
 
             const originalEnvPortValue = process.env.VM_DEBUG_PORT;
             const originalEnvOutputValue = process.env.VM_DEBUG_EXEC_INFO_FILE;
@@ -142,7 +164,7 @@ async function activate(context) {
                     const result = await startRustAnalyzerDebugSession();
                     
                     if (!result) {
-                        vscode.window.showErrorMessage('Failed to start debug session. Please ensure you have selected a runnable in the rust-analyzer prompt.');
+                        vscode.window.showInformationMessage('Please ensure you have selected a runnable in the rust-analyzer prompt.');
                         return;
                     }
 
@@ -170,6 +192,7 @@ async function activate(context) {
                 }
             }
         } catch (err) {
+            console.log(err);
             vscode.window.showErrorMessage(`Failed to debug with Gimlet: ${err.message}`);
         }
     });
@@ -208,6 +231,76 @@ async function startRustAnalyzerDebugSession() {
     // rust-analyzer command to debug reusing the client and runnables it creates initially
     return await vscode.commands.executeCommand("rust-analyzer.debug");
 }
+
+
+/**
+ * Finds all Cargo.toml files recursively, including inside Anchor `programs/*` or `tests/*`
+ */
+async function findAllCargoToml(dir){
+  const results = [];
+
+  async function walk(current) {
+    const entries = await fs.readdir(current, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (
+        entry.name === 'target' ||
+        entry.name === 'node_modules' ||
+        entry.name.startsWith('.')
+      ) {
+        continue;
+      }
+
+      const fullPath = path.join(current, entry.name);
+
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+      } else if (entry.isFile() && entry.name === 'Cargo.toml') {
+        results.push(fullPath);
+      }
+    }
+  }
+
+  await walk(dir);
+  return results;
+}
+
+/**
+ * Recursively searches for Cargo.toml files and returns true if any contain `litesvm`
+ */
+async function hasLitesvmDependency(rootDir) {
+  const cargoFiles = await findAllCargoToml(rootDir);
+
+  for (const cargoPath of cargoFiles) {
+    try {
+      const content = await fs.readFile(cargoPath, 'utf8');
+      const parsed = toml.parse(content);
+
+      const deps = parsed.dependencies ?? {};
+      const devDeps = parsed['dev-dependencies'] ?? {};
+
+      if (deps['litesvm'] || devDeps['litesvm']) {
+        console.log(`Found litesvm in ${cargoPath}`);
+        return true;
+      }
+    } catch (e) {
+      console.warn(`Failed to parse ${cargoPath}:`, e);
+    }
+  }
+
+  return false;
+}
+
+async function fileExists(path) {
+    try {
+        await fs.access(path);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+
 module.exports = {
     activate,
     deactivate,
