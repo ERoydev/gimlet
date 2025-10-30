@@ -132,13 +132,14 @@ async function activate(context) {
                 if (language == 'rust') {
                     const debugListener = vscode.debug.onDidStartDebugSession(session => {
                         // Literally this is the place where the debugging starts
-                        if (session.type === 'lldb' || session.type === 'rust-analyzer') {
+                        // Only the first occurrence of lldb session is relevant(the test session)
+                        if (session.type === 'lldb') {
                             debuggerSession.debugSessionId = session.id;
+                            debugListener.dispose();
                         }
                     });
                     
                     const result = await startRustAnalyzerDebugSession();
-                    debugListener.dispose();
                     
                     if (!result) {
                         vscode.window.showErrorMessage('Failed to start debug session. Please ensure you have selected a runnable in the rust-analyzer prompt.');
