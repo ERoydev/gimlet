@@ -38,6 +38,7 @@ class PortManager {
     }
 
     /**
+     * Used for rust tests
      * Listen for up to 4 ports (for CPI depth 4).
      * When a port opens, use the program hash to create the launch config and start debugging.
      * @param {number[]} ports - array of ports to listen on
@@ -53,7 +54,16 @@ class PortManager {
         const startedPorts = new Set();
         while (this.pollingTokens[pollingKey] === myToken) {
             for (const port of ports) {
-                if (startedPorts.has(port)) continue;
+                if (startedPorts.has(port)) {
+                    // Check if the port is still open
+                    const stillOpen = await this.isPortOpen(port);
+                    if (!stillOpen) {
+                        startedPorts.delete(port); // Allow to start again if reopened
+                    } else {
+                        // Still open, skip
+                        continue;
+                    }
+                }
 
                 const isOpen = await this.isPortOpen(port);
 
@@ -79,7 +89,7 @@ class PortManager {
                         await vscode.debug.startDebugging(globalState.globalWorkspaceFolder, launchConfig);
                         startedPorts.add(port);
                     }
-                }
+                } 
             }
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
