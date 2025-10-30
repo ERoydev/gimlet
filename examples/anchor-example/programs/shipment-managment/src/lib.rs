@@ -14,6 +14,7 @@ pub mod shipment_managment {
     }
 
     pub fn create_shipment(ctx: Context<CreateShipment>) -> Result<()> {
+        let p = &ctx;
         let counter = &mut ctx.accounts.counter;
         let shipment = &mut ctx.accounts.shipment;
 
