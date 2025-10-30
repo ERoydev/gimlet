@@ -19,11 +19,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Download Build Artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: ubuntu-latest
-
       - name: Publish to Visual Studio Marketplace
         uses: HaaLeo/publish-vscode-extension@v2
         with:
