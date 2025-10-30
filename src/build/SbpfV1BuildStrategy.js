@@ -49,6 +49,7 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
         console.log(`Running build command: ${this.buildCommand}`);
         return new Promise((resolve) => {
             exec(
+                // `[ -f Anchor.toml ] && anchor build; rm target/deploy/*.so ; ${this.buildCommand}`,
                 this.buildCommand,
                 { cwd: this.workspaceFolder },
                 async (err, stdout, stderr) => {
@@ -67,9 +68,6 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
                         resolve();
                         return;
                     }
-
-                    // TODO: Can introduce some issues because i define these executable paths in the state long before this line
-                    const executables = this.findExecutables(newFiles);
 
                     if (progress)
                         progress.report({
