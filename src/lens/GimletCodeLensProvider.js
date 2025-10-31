@@ -89,9 +89,10 @@ class GimletCodeLensProvider {
         }
 
         // Check if function name suggests it's a test
+        // TODO: For rust tests i need to look only for the macro, but for typescript i prefer looking for `it`
         const testNamePatterns = [
-            /^test_/,
-            /_test$/,
+            // /^test_/,
+            // /_test$/,
             /^it_/,
             /^should_/
         ];
@@ -103,7 +104,7 @@ class GimletCodeLensProvider {
      * Checks for test-related attributes above a function
      */
     hasTestAttribute(document, lineIndex) {
-        for (let i = lineIndex - 1; i >= 0; i--) {
+        for (let i = lineIndex; i >= 0; i--) {
             const line = document.lineAt(i);
             const trimmed = line.text.trim();
 
@@ -111,9 +112,6 @@ class GimletCodeLensProvider {
             const testAttributes = [
                 /#\[test\]/,
                 /#\[tokio::test\]/,
-                /#\[async_test\]/,
-                /#\[test\(.*\)\]/,  // parameterized tests
-                /#\[cfg\(test\)\]/
             ];
 
             if (testAttributes.some(attr => attr.test(trimmed))) {
