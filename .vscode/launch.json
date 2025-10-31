@@ -15,6 +15,8 @@
                 "--folder-uri",
                 // "file:///Users/emilemilovroydev/Rust/projects/Solana/gimlet-raw/gimlet/examples/anchor-multi-program"
                 "file:///Users/emilemilovroydev/Rust/projects/Solana/gimlet-raw/anchor_cpi"
+                // "file:///Users/emilemilovroydev/Rust/projects/Solana/gimlet-raw/anchor_cpi/native_apps/test-with-mollusk/native_app2"
+                // "file:///Users/emilemilovroydev/Rust/projects/Solana/gimlet-raw/anchor_cpi/native_apps/p-app"
 
             ],
             "outFiles": ["${workspaceFolder}/out/**/*.js"],

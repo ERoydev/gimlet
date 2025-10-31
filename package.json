@@ -4,7 +4,7 @@
     "description": "Debug Solana programs easily",
     "publisher": "emilroydev",
     "icon": "images/logo.png",
-    "version": "0.0.12",
+    "version": "0.0.17",
     "galleryBanner.color": {
         "color": "#21214c",
         "theme": "dark"
