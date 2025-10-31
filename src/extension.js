@@ -16,6 +16,7 @@ const { setDebuggerSession, clearDebuggerSession } = require('./managers/session
 const { VM_DEBUG_EXEC_INFO_FILE } = require('./constants');
 
 const { workspaceHasLitesvmOrMollusk } = require('./utils');
+const { isSessionRunning, hasSupportedBackend } = require('./debug');
 
 let debuggerSession = null;
 
@@ -54,7 +55,7 @@ async function activate(context) {
     const hasLitesvmOrMollusk = await workspaceHasLitesvmOrMollusk(rootPath);
 
     if (!hasLitesvmOrMollusk) {
-        // Don't activate the extension if litesvm is not found
+        // Don't activate the extension if litesvm/mollusk is not found
         return;
     }
 
@@ -94,15 +95,12 @@ async function activate(context) {
         
     const sbpfDebugDisposable = vscode.commands.registerCommand('gimlet.debugAtLine', async (document) => {
         // Prevent starting a new session if one is already running
-        if (debuggerSession && debuggerSession.debugSessionId) {
+        if (isSessionRunning()) {
             vscode.window.showInformationMessage('A Gimlet debug session is already running. Please stop the current session before starting a new one.');
             return;
         }
 
-        console.log(globalState.globalWorkspaceFolder);
-        const hasLitesvmOrMollusk = await workspaceHasLitesvmOrMollusk(globalState.globalWorkspaceFolder); 
-
-        if (!hasLitesvmOrMollusk) {
+        if (!(await hasSupportedBackend())) {
             // Don't activate the extension if litesvm/mollusk is not found
             vscode.window.showInformationMessage('Litesvm or Mollusk not found in Cargo.toml. Add litesvm or mollusk to use Gimlet debugging.');
             return;
