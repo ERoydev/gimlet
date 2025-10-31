@@ -20,6 +20,9 @@ const { isSessionRunning, hasSupportedBackend } = require('./debug');
 
 let debuggerSession = null;
 
+// Global array ofr disposables that belong to activateDebugger
+let debuggerDisposables = [];
+
 async function SbpfCompile() {
     // TODO: Implement a dispatcher for different build strategies if we decide to add more in the future
     debuggerSession.buildStrategy = new SbpfV1BuildStrategy(globalState.globalWorkspaceFolder);
@@ -48,6 +51,28 @@ async function SbpfCompile() {
  * @param {vscode.ExtensionContext} context
  */
 async function activate(context) {
+
+    await activateDebugger(context);
+
+    const watcher = vscode.workspace.createFileSystemWatcher('**/Cargo.toml');
+    watcher.onDidChange(() => activateDebugger(context));
+    watcher.onDidCreate(() => activateDebugger(context));
+    watcher.onDidDelete(() => activateDebugger(context));
+
+    context.subscriptions.push(watcher);    
+}
+
+function deactivate() {
+    cleanupDebuggerSession();
+}
+
+async function activateDebugger(context) {
+    // Dispose all old resources before reinitializing
+    for (const d of debuggerDisposables) {
+        try { d.dispose(); } catch {}
+    }
+    debuggerDisposables = [];
+
     const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri; // you said you already have it
     if (!workspaceUri) return;
 
@@ -65,8 +90,8 @@ async function activate(context) {
     // Set necessary VS Code settings for optimal debugging experience
     rustAnalyzerSettingsManager.set('debug.engine', 'vadimcn.vscode-lldb');
     editorSettingsManager.set('codeLens', true);
-    
-    // This is automated script to check dependencies for Gimlet
+
+     // This is automated script to check dependencies for Gimlet
     const setupDisposable = vscode.commands.registerCommand(
         'extension.runGimletSetup',
         () => {
@@ -86,7 +111,7 @@ async function activate(context) {
     );
 
     // Listener to handle when debug ends and extension can clean up
-    vscode.debug.onDidTerminateDebugSession(session => {
+    const debugListener = vscode.debug.onDidTerminateDebugSession(session => {
         if (session.id === debuggerSession.debugSessionId) {
             portManager.cleanup(); // Clean up any active port polling when session ends
             cleanupDebuggerSession();
@@ -176,16 +201,19 @@ async function activate(context) {
     });
         
     // Add all disposables to context subscriptions
-    context.subscriptions.push(
+    debuggerDisposables.push(
         setupDisposable,
         codeLensDisposable,
-        sbpfDebugDisposable
-    );
+        sbpfDebugDisposable,
+        debugListener
+    )
+    // context.subscriptions.push(
+    //     setupDisposable,
+    //     codeLensDisposable,
+    //     sbpfDebugDisposable
+    // );
 }
 
-function deactivate() {
-    cleanupDebuggerSession();
-}
 
 // UTILS FOR DEBUG
 async function startPortDebugListeners() {
