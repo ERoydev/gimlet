@@ -12,7 +12,6 @@ vsc-extension-quickstart.md
 # Exclude example projects and their build artifacts
 examples/**
 **/target/**
-**/node_modules/**
 **/ledger/**
 **/test-ledger/**
 **/snapshot/**

@@ -69,8 +69,8 @@ class PortManager {
 
                 if (isOpen) {
                     // When port opens get the program name from the current hash
-                    const programName = await debugConfigManager.waitForProgramName();
-                    if (!programName) {
+                    const programPath = await debugConfigManager.waitForProgramName();
+                    if (!programPath) {
                         vscode.window.showErrorMessage('Timed out waiting for program. Stopping debug session.');
                         delete this.pollingTokens[pollingKey]; // Stop the while loop
                         await vscode.debug.stopDebugging(); // This stops the active debug session
@@ -78,7 +78,7 @@ class PortManager {
                     };
 
                     // Dynamically create launch config using program hash or other info
-                    const launchConfig = debugConfigManager.getLaunchConfigForSolanaLldb(port, programName);
+                    const launchConfig = await debugConfigManager.getLaunchConfigForSolanaLldb(port, programPath);
                     if (!launchConfig) continue;
 
                     const alreadyRunning = Array.isArray(vscode.debug.sessions)

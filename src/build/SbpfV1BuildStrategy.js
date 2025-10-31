@@ -4,15 +4,15 @@ const vscode = require('vscode');
 const fs = require('fs');
 const { exec } = require('child_process');
 const BuildCommands = require('./buildCommands');
+const gimletConfigManager  = require('../config');
+const { safeReadDir } = require('../projectStructure');
 
 class SbpfV1BuildStrategy extends BaseBuildStrategy {
     constructor(
         workspaceFolder,
-        depsPath,
-        availablePrograms, 
         buildCommand = BuildCommands.SBF_V1_DEBUG()
     ) {
-        super(workspaceFolder, depsPath, availablePrograms);
+        super(workspaceFolder);
         this.buildCommand = buildCommand;
         this.debuggerSession = getDebuggerSession();
     }
@@ -25,32 +25,17 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
         return this.constructor.BUILD_TYPE;
     }
 
+    getBuildCommand() {
+        return `[ -f Anchor.toml ] && anchor build; rm target/deploy/*.so | true ; ${this.buildCommand}`;
+    }
+
     async build(progress) {
-        let files = await this._safeReadDir(this.depsPath);
-        if (!files) return;
+        const buildCmd = this.getBuildCommand();
+        console.log(` Running command: ${buildCmd}`);
 
-        const executablesPaths = this.findExecutables(files);
-        this.debuggerSession.executablesPaths = executablesPaths;
-
-        for (let packageName of this.availablePrograms) {
-            if (!executablesPaths[packageName]) {
-                vscode.window.showErrorMessage(
-                    `Could not find compiled executable for program: ${packageName} in target/deploy`
-                );
-                return;
-            }
-
-            const { debugBinary, bpfCompiledPath } = executablesPaths[packageName];
-
-            this._deleteIfExists(debugBinary);
-            this._deleteIfExists(bpfCompiledPath);
-        }
-
-        console.log(`Running build command: ${this.buildCommand}`);
         return new Promise((resolve) => {
             exec(
-                // `[ -f Anchor.toml ] && anchor build; rm target/deploy/*.so ; ${this.buildCommand}`,
-                this.buildCommand,
+                buildCmd,
                 { cwd: this.workspaceFolder },
                 async (err, stdout, stderr) => {
                     if (err) {
@@ -61,12 +46,32 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
                         return;
                     }
 
-                    // After build, set the globalExecutablePath, since its used to load the debug target in launch config
+                    // Load the depsPath from gimlet config
+                    const { depsPath } = await gimletConfigManager.resolveGimletConfig();
+                    this.depsPath = depsPath;
+
                     // Holds all the compiled programs in target/deploy
-                    let newFiles = await this._safeReadDir(this.depsPath);
+                    let newFiles = await safeReadDir(this.depsPath);
                     if (!newFiles) {
                         resolve();
                         return;
+                    }
+
+                    // Hash all the compiled programs
+                    for (let programCompiledFile of newFiles) {
+                        if (!programCompiledFile.endsWith('.so')) {
+                            continue;
+                        }
+
+                        const debugBinaryPath = `${this.depsPath}/${programCompiledFile.replace('.so', '.debug')}`;
+                        const bpfCompiledPath = `${this.depsPath}/${programCompiledFile}`;
+                        
+                        this.hashProgram(programCompiledFile);
+
+                        this.debuggerSession.executablesPaths[programCompiledFile] = {
+                            debugBinary: debugBinaryPath,
+                            bpfCompiledPath: bpfCompiledPath
+                        };
                     }
 
                     if (progress)
@@ -84,15 +89,6 @@ class SbpfV1BuildStrategy extends BaseBuildStrategy {
     _deleteIfExists(filePath) {
         if (filePath && fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
-        }
-    }
-
-    async _safeReadDir(dirPath) {
-        try {
-            return await fs.promises.readdir(dirPath);
-        } catch (err) {
-            vscode.window.showErrorMessage(`Error reading directory after V1 build: ${err}`);
-            return null;
         }
     }
 }

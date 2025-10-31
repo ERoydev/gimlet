@@ -1,13 +1,9 @@
 const vscode = require('vscode');
 const path = require('path');
-const fs = require('fs/promises');
-const toml = require('toml');
 
 const gimletConfigManager  = require('./config');
 const { globalState } = require('./state/globalState');
 const { createSessionState } = require('./state/sessionState');
-
-const { findSolanaPackageName } = require('./projectStructure');
 
 const { SbpfV1BuildStrategy } = require('./build/sbpfV1BuildStrategy');
 const { GimletCodeLensProvider } = require('./lens/gimletCodeLensProvider');
@@ -19,29 +15,13 @@ const { debugConfigManager } = require('./managers/debugConfigManager');
 const { setDebuggerSession, clearDebuggerSession } = require('./managers/sessionManager');
 const { VM_DEBUG_EXEC_INFO_FILE } = require('./constants');
 
+const { workspaceHasLitesvmOrMollusk } = require('./utils');
+
 let debuggerSession = null;
 
 async function SbpfCompile() {
-    const { depsPath } = await gimletConfigManager.resolveGimletConfig();
-
-    if (!await fileExists(depsPath)) {
-        vscode.window.showInformationMessage(
-            'Target folder not found. Cargo is installing necessary tools.'
-        );
-    }
-
-    const programNamesList = await findSolanaPackageName(globalState.globalWorkspaceFolder);
-    debuggerSession.executables = programNamesList;
-
-    if (programNamesList.length == 0 || !programNamesList) {
-        vscode.window.showErrorMessage(
-            'Could not find package name in any Cargo.toml'
-        );
-        return;
-    }
-
     // TODO: Implement a dispatcher for different build strategies if we decide to add more in the future
-    debuggerSession.buildStrategy = new SbpfV1BuildStrategy(globalState.globalWorkspaceFolder, depsPath, programNamesList);
+    debuggerSession.buildStrategy = new SbpfV1BuildStrategy(globalState.globalWorkspaceFolder);
 
     return vscode.window.withProgress(
         {
@@ -71,9 +51,9 @@ async function activate(context) {
     if (!workspaceUri) return;
 
     const rootPath = workspaceUri.fsPath;
-    const hasLitesvm = await hasLitesvmDependency(rootPath);
+    const hasLitesvmOrMollusk = await workspaceHasLitesvmOrMollusk(rootPath);
 
-    if (!hasLitesvm) {
+    if (!hasLitesvmOrMollusk) {
         // Don't activate the extension if litesvm is not found
         return;
     }
@@ -120,11 +100,11 @@ async function activate(context) {
         }
 
         console.log(globalState.globalWorkspaceFolder);
-        const hasLitesvm = await hasLitesvmDependency(globalState.globalWorkspaceFolder); 
+        const hasLitesvmOrMollusk = await workspaceHasLitesvmOrMollusk(globalState.globalWorkspaceFolder); 
 
-        if (!hasLitesvm) {
-            // Don't activate the extension if litesvm is not found
-            vscode.window.showInformationMessage('Litesvm dependency not found in Cargo.toml. Please add litesvm to your dependencies to use Gimlet debugging features.');
+        if (!hasLitesvmOrMollusk) {
+            // Don't activate the extension if litesvm/mollusk is not found
+            vscode.window.showInformationMessage('Litesvm or Mollusk not found in Cargo.toml. Add litesvm or mollusk to use Gimlet debugging.');
             return;
         }
 
@@ -209,6 +189,7 @@ function deactivate() {
     cleanupDebuggerSession();
 }
 
+// UTILS FOR DEBUG
 async function startPortDebugListeners() {
     const initialTcpPort = debuggerSession.tcpPort;
     const CPI_PORT_COUNT = 4; // Solana currently supports up to 4 for CPI
@@ -230,74 +211,6 @@ function cleanupDebuggerSession() {
 async function startRustAnalyzerDebugSession() {
     // rust-analyzer command to debug reusing the client and runnables it creates initially
     return await vscode.commands.executeCommand("rust-analyzer.debug");
-}
-
-
-/**
- * Finds all Cargo.toml files recursively, including inside Anchor `programs/*` or `tests/*`
- */
-async function findAllCargoToml(dir){
-  const results = [];
-
-  async function walk(current) {
-    const entries = await fs.readdir(current, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (
-        entry.name === 'target' ||
-        entry.name === 'node_modules' ||
-        entry.name.startsWith('.')
-      ) {
-        continue;
-      }
-
-      const fullPath = path.join(current, entry.name);
-
-      if (entry.isDirectory()) {
-        await walk(fullPath);
-      } else if (entry.isFile() && entry.name === 'Cargo.toml') {
-        results.push(fullPath);
-      }
-    }
-  }
-
-  await walk(dir);
-  return results;
-}
-
-/**
- * Recursively searches for Cargo.toml files and returns true if any contain `litesvm`
- */
-async function hasLitesvmDependency(rootDir) {
-  const cargoFiles = await findAllCargoToml(rootDir);
-
-  for (const cargoPath of cargoFiles) {
-    try {
-      const content = await fs.readFile(cargoPath, 'utf8');
-      const parsed = toml.parse(content);
-
-      const deps = parsed.dependencies ?? {};
-      const devDeps = parsed['dev-dependencies'] ?? {};
-
-      if (deps['litesvm'] || devDeps['litesvm']) {
-        console.log(`Found litesvm in ${cargoPath}`);
-        return true;
-      }
-    } catch (e) {
-      console.warn(`Failed to parse ${cargoPath}:`, e);
-    }
-  }
-
-  return false;
-}
-
-async function fileExists(path) {
-    try {
-        await fs.access(path);
-        return true;
-    } catch {
-        return false;
-    }
 }
 
 

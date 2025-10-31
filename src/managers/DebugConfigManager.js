@@ -1,41 +1,19 @@
 const fs = require('fs');
-// const path = require('path');
-// const toml = require('toml');
 const { globalState } = require('../state/globalState');
 const { getDebuggerSession } = require('../managers/sessionManager');
 const vscode = require('vscode');
 const { spawn } = require('child_process');
 const { VM_DEBUG_EXEC_INFO_FILE } = require('../constants');
+
 class DebugConfigManager {
-
-    // getTestRunnerFromAnchorToml(workspaceFolder) {
-    //     const anchorTomlPath = path.join(workspaceFolder, 'Anchor.toml');
-    //     if (!fs.existsSync(anchorTomlPath)) return null;
-    //     const tomlContent = fs.readFileSync(anchorTomlPath, 'utf8');
-    //     const config = toml.parse(tomlContent);
-    
-    //     if (config.scripts && config.scripts.test) {
-    //         // Example: "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
-    //         const testScript = config.scripts.test;
-    //         // Extract runner and args (simple heuristic)
-    //         const match = testScript.match(/(?:yarn run |npx )?([^\s]+)(.*)/);
-    //         if (match) {
-    //             const runner = match[1]; // e.g., ts-mocha
-    //             const args = match[2].trim().split(/\s+/); // split args
-    //             return { runner, args };
-    //         }
-    //     }
-    //     return null;
-    // }
-
-    getLaunchConfigForSolanaLldb(currentTcpPort, programName) {
+    async getLaunchConfigForSolanaLldb(currentTcpPort, programKey) {
         const debuggerSession = getDebuggerSession();
         if (!debuggerSession) {
             vscode.window.showErrorMessage('No active debugger session found.');
             return null;
         }
         
-        const executablesOfProgram = debuggerSession.executablesPaths[programName];
+        const executablesOfProgram = debuggerSession.executablesPaths[programKey];
         const debugExecutablePath = executablesOfProgram ? executablesOfProgram.debugBinary : null;
 
         if (!debugExecutablePath || !fs.existsSync(debugExecutablePath)) {
@@ -69,10 +47,10 @@ class DebugConfigManager {
             while (Date.now() - start < timeoutMs) {
                 // TODO: Handle situations where we have a CPI to a program that is not in this project.
                 // It will not be in our map and we need to handle that case.
-                const programName = debuggerSession.programHashToProgramName[debuggerSession.currentProgramHash];
-                if (programName) {
+                const programKey = debuggerSession.programHashToProgramName[debuggerSession.currentProgramHash];
+                if (programKey) {
                     debuggerSession.tmpFilePollToken = null; // Stop polling
-                    return programName;
+                    return programKey;
                 };
                 await new Promise(resolve => setTimeout(resolve, intervalMs));
             }
