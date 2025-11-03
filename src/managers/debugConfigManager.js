@@ -133,10 +133,6 @@ class DebugConfigManager {
             await new Promise(resolve => setTimeout(resolve, intervalMs));
         }
         
-        if (Date.now() - start >= timeoutMs) {
-            vscode.window.showWarningMessage(`Timeout: ${VM_DEBUG_EXEC_INFO_FILE} not found`);
-        }
-        
         debuggerSession.tmpFilePollToken = null;
     }
 }
