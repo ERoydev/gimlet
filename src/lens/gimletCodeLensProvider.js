@@ -25,7 +25,7 @@ class GimletCodeLensProvider {
                         const functionName = symbol.name;
                         const line = symbol.range.start.line;
 
-                        if (this.isTestFunction(document, line, functionName)) {
+                        if (this.hasTestAttribute(document, line, functionName)) {
                             lenses.push(
                                 new vscode.CodeLens(symbol.range, {
                                     title: `$(debug-alt) ${LENS_TITLE}`,
@@ -77,29 +77,6 @@ class GimletCodeLensProvider {
 
     return lenses;
 }
-
-    /**
-     * Determines if a function is a test function by checking for test attributes
-     * or test naming conventions
-     */
-    isTestFunction(document, lineIndex, functionName) {
-        // Check for test attributes above the function
-        if (this.hasTestAttribute(document, lineIndex)) {
-            return true;
-        }
-
-        // Check if function name suggests it's a test
-        // TODO: For rust tests i need to look only for the macro, but for typescript i prefer looking for `it`
-        const testNamePatterns = [
-            // /^test_/,
-            // /_test$/,
-            /^it_/,
-            /^should_/
-        ];
-
-        return testNamePatterns.some(pattern => pattern.test(functionName));
-    }
-
     /**
      * Checks for test-related attributes above a function
      */
@@ -128,13 +105,6 @@ class GimletCodeLensProvider {
         }
 
         return false;
-    }
-
-    getAnchorProgramName(document) {
-    // Example: /workspace/programs/program-a/src/lib.rs
-        const filePath = document.uri.fsPath;
-        const match = filePath.match(/programs[\/\\]([^\/\\]+)/);
-        return match ? match[1] : null;
     }
 
     extractTestNameFromSymbolName(symbolName) {
