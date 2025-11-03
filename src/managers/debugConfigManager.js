@@ -72,6 +72,7 @@ class DebugConfigManager {
                 env: {
                     ...process.env,
                     VM_DEBUG_PORT: globalState.tcpPort.toString(),
+                    VM_DEBUG_EXEC_INFO_FILE: VM_DEBUG_EXEC_INFO_FILE,
                 },
                 cwd: globalState.globalWorkspaceFolder,
                 stdio: ['inherit', 'pipe', 'pipe']
@@ -80,17 +81,8 @@ class DebugConfigManager {
             anchorProcess.stderr.on('data', (data) => {
                 const output = data.toString();
                 
-                // Extract SHA256 hash from stderr
-                // TODO: use the output in /tmp/... instead of this
-                const match = output.match(/Debugging executable with \(pre-load\) SHA256: ([a-f0-9]{64})/);
-                if (match) {
-                    const hash = match[1];
-                    // Update the debug session directly
-                    const debuggerSession = getDebuggerSession();
-                    if (debuggerSession) {
-                        debuggerSession.currentProgramHash = hash;
-                    }
-                }
+                const debuggerSession = getDebuggerSession();
+                this.pollForTmpFile(debuggerSession);
             });
 
             anchorProcess.on('error', (error) => {
