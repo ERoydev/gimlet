@@ -13,7 +13,7 @@ class PortManager {
         return new Promise((resolve) => {
             exec(
                 `netstat -nat | grep -E '[:|.]${port}\\b' | wc -l`,
-                (err, stdout, stderr) => {
+                (err, stdout) => {
                     if (stdout.trim() > 0) {
                         resolve(false);
                     } else {
@@ -29,7 +29,7 @@ class PortManager {
         return new Promise((resolve) => {
             exec(
                 `netstat -nat | grep -E '[:|.]${port}\\b' | grep 'LISTEN' | wc -l`,
-                (err, stdout, stderr) => {
+                (err, stdout) => {
                     const isOpen = stdout.trim() === '1';
                     resolve(isOpen);
                 }
