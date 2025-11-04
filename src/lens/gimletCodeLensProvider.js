@@ -53,13 +53,14 @@ class GimletCodeLensProvider {
             // Recursively process symbols to find describe/it/test blocks
             const processSymbols = (symbols) => {
                 for (const symbol of symbols) {
-                    if (symbol.name && /^(it|test)\b/i.test(symbol.name)) {
+                    if (symbol.name && /^(describe)\b/i.test(symbol.name)) {
                         const range = symbol.range;
                         const functionName = this.extractTestNameFromSymbolName(symbol.name);
+                        const TS_LENS_TITLE = 'Sbpf Debug All';
 
                         lenses.push(
                             new vscode.CodeLens(range, {
-                                title: `$(debug-alt) ${LENS_TITLE}`,
+                                title: `$(debug-alt) ${TS_LENS_TITLE}`,
                                 command: "gimlet.debugAtLine",
                                 arguments: [document, functionName],
                             })
