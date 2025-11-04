@@ -85,9 +85,6 @@ class DebugConfigManager {
                 const output = data.toString();
                 const formatted = `[${new Date().toISOString()}] [stderr] ${output}`;
                 logStream.write(formatted);
-
-                const debuggerSession = getDebuggerSession();
-                this.pollForTmpFile(debuggerSession);
             });
 
             anchorProcess.stdout.on('data', (data) => {
