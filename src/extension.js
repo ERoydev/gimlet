@@ -73,7 +73,6 @@ async function activateDebugger(context) {
 
     isActivationInProgress = true;
 
-
     try {
         // Dispose all old resources before reinitializing
         for (const d of debuggerDisposables) {
@@ -152,10 +151,10 @@ async function activateDebugger(context) {
                 await new Promise(resolve => setTimeout(resolve, 500));
     
     
-                const originalEnvPortValue = process.env.VM_DEBUG_PORT;
+                const originalEnvPortValue = process.env.SBPF_DEBUG_PORT;
                 const originalEnvOutputValue = process.env.VM_DEBUG_EXEC_INFO_FILE;
     
-                process.env.VM_DEBUG_PORT = debuggerSession.tcpPort.toString();
+                process.env.SBPF_DEBUG_PORT = debuggerSession.tcpPort.toString();
                 process.env.VM_DEBUG_EXEC_INFO_FILE = VM_DEBUG_EXEC_INFO_FILE;
     
                 // remove the lldb.library setting to allow rust-analyzer/typescript test debugger to work properly
@@ -191,9 +190,9 @@ async function activateDebugger(context) {
                 } finally {
                     // Cleanup strategy for the ENV after command execution
                     if (originalEnvPortValue === undefined) {
-                        delete process.env.VM_DEBUG_PORT;
+                        delete process.env.SBPF_DEBUG_PORT;
                     } else {
-                        process.env.VM_DEBUG_PORT = originalEnvPortValue;
+                        process.env.SBPF_DEBUG_PORT = originalEnvPortValue;
                     }
     
                     if (originalEnvOutputValue === undefined) {
@@ -222,8 +221,6 @@ async function activateDebugger(context) {
         isActivationInProgress = false;
     }
 }
-
-
 
 // UTILS FOR DEBUG
 async function startPortDebugListeners() {

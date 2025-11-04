@@ -74,7 +74,7 @@ class DebugConfigManager {
             const anchorProcess = spawn('anchor', ['test'], {
                 env: {
                     ...process.env,
-                    VM_DEBUG_PORT: globalState.tcpPort.toString(),
+                    SBPF_DEBUG_PORT: globalState.tcpPort.toString(),
                     VM_DEBUG_EXEC_INFO_FILE: VM_DEBUG_EXEC_INFO_FILE,
                 },
                 cwd: globalState.globalWorkspaceFolder,
