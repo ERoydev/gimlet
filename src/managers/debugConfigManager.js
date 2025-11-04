@@ -66,6 +66,9 @@ class DebugConfigManager {
 
     // The test executor for TS anchor tests
     async spawnAnchorTestProcess() {
+        const logFilePath = `${globalState.globalWorkspaceFolder}/.gimlet.log`;
+        const logStream = fs.createWriteStream(logFilePath, { flags: 'w' });  
+
         return new Promise((resolve, reject) => {
             // Get the active debug console
             const anchorProcess = spawn('anchor', ['test'], {
@@ -80,9 +83,17 @@ class DebugConfigManager {
 
             anchorProcess.stderr.on('data', (data) => {
                 const output = data.toString();
-                
+                const formatted = `[${new Date().toISOString()}] [stderr] ${output}`;
+                logStream.write(formatted);
+
                 const debuggerSession = getDebuggerSession();
                 this.pollForTmpFile(debuggerSession);
+            });
+
+            anchorProcess.stdout.on('data', (data) => {
+                const output = data.toString();
+                const formatted = `[${new Date().toISOString()}] [stdout] ${output}`;
+                logStream.write(formatted);
             });
 
             anchorProcess.on('error', (error) => {
@@ -121,8 +132,9 @@ class DebugConfigManager {
                     // Set the hash so waitForProgramName can use it
                     debuggerSession.currentProgramHash = content.trim();
                     
-                    // delete the file after reading
-                    fs.unlinkSync(filePath);
+                    // delete the file after reading, may lead to multithreading issues
+                    // lets say i read current program hash and before i delete it i receive another program hash and delete the new output
+                    // fs.unlinkSync(filePath);
                     
                     break; // Stop polling once file is found
                 }
